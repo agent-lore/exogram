@@ -113,22 +113,22 @@ jobs:
         run: |
           uv python install 3.11
           uv pip install mcp
-          python -c "
-import asyncio
-from mcp import ClientSession
-from mcp.client.sse import sse_client
+          python << 'EOF'
+          import asyncio
+          from mcp import ClientSession
+          from mcp.client.sse import sse_client
 
-async def test():
-    async with sse_client('http://localhost:8765/sse') as (r, w):
-        async with ClientSession(r, w) as s:
-            await s.initialize()
-            tools = await s.list_tools()
-            print(f'Connected! Found {len(tools.tools)} tools')
-            assert len(tools.tools) >= 15, 'Expected at least 15 tools'
-            print('Integration test passed!')
+          async def test():
+              async with sse_client('http://localhost:8765/sse') as (r, w):
+                  async with ClientSession(r, w) as s:
+                      await s.initialize()
+                      tools = await s.list_tools()
+                      print(f'Connected! Found {len(tools.tools)} tools')
+                      assert len(tools.tools) >= 15, 'Expected at least 15 tools'
+                      print('Integration test passed!')
 
-asyncio.run(test())
-"
+          asyncio.run(test())
+          EOF
 
       - name: Cleanup
         if: always()
