@@ -89,15 +89,16 @@ def serve(
 
         if transport == "stdio":
             # Run with stdio transport
-            await server.mcp.run_async(transport="stdio")
+            await server.mcp.run_stdio_async(show_banner=False)
         else:
-            # Run with SSE transport
+            # Run with SSE transport using run_http_async
             click.echo(f"Listening on http://{host}:{port}")
-            await server.mcp.run_async(
+            await server.mcp.run_http_async(
                 transport="sse",
-                sse_path="/sse",
                 host=host,
                 port=port,
+                path="/sse",
+                show_banner=False,
             )
 
     try:
