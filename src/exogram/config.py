@@ -124,10 +124,7 @@ def load_config(path: str | None = None) -> ExogramConfig:
     # Start with defaults or load from file
     if path:
         config_path = Path(path)
-        if config_path.exists():
-            config = ExogramConfig.from_yaml(config_path)
-        else:
-            config = ExogramConfig()
+        config = ExogramConfig.from_yaml(config_path) if config_path.exists() else ExogramConfig()
     else:
         config = ExogramConfig()
 
