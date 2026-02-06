@@ -22,7 +22,7 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --extra dev
 
       - name: Run Ruff linter
         run: uv run ruff check src/ tests/
@@ -45,7 +45,7 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --extra dev
 
       - name: Run tests
         run: uv run pytest tests/ -v --tb=short
@@ -63,6 +63,13 @@ jobs:
     name: Docker Build
     runs-on: ubuntu-latest
     steps:
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
       - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
@@ -113,22 +120,22 @@ jobs:
         run: |
           uv python install 3.11
           uv pip install mcp
-          python -c "
-import asyncio
-from mcp import ClientSession
-from mcp.client.sse import sse_client
+          python << 'EOF'
+          import asyncio
+          from mcp import ClientSession
+          from mcp.client.sse import sse_client
 
-async def test():
-    async with sse_client('http://localhost:8765/sse') as (r, w):
-        async with ClientSession(r, w) as s:
-            await s.initialize()
-            tools = await s.list_tools()
-            print(f'Connected! Found {len(tools.tools)} tools')
-            assert len(tools.tools) >= 15, 'Expected at least 15 tools'
-            print('Integration test passed!')
+          async def test():
+              async with sse_client('http://localhost:8765/sse') as (r, w):
+                  async with ClientSession(r, w) as s:
+                      await s.initialize()
+                      tools = await s.list_tools()
+                      print(f'Connected! Found {len(tools.tools)} tools')
+                      assert len(tools.tools) >= 15, 'Expected at least 15 tools'
+                      print('Integration test passed!')
 
-asyncio.run(test())
-"
+          asyncio.run(test())
+          EOF
 
       - name: Cleanup
         if: always()
