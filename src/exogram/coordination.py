@@ -1,5 +1,6 @@
 """Coordination service - SQLite-based tasks, claims, agents, findings."""
 
+import contextlib
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -273,10 +274,8 @@ class CoordinationService:
 
             metadata = {}
             if row["metadata"]:
-                try:
+                with contextlib.suppress(json.JSONDecodeError):
                     metadata = json.loads(row["metadata"])
-                except json.JSONDecodeError:
-                    pass
 
             return Agent(
                 id=row["id"],
@@ -317,10 +316,8 @@ class CoordinationService:
             for row in rows:
                 metadata = {}
                 if row["metadata"]:
-                    try:
+                    with contextlib.suppress(json.JSONDecodeError):
                         metadata = json.loads(row["metadata"])
-                    except json.JSONDecodeError:
-                        pass
 
                 agents.append(Agent(
                     id=row["id"],
@@ -383,10 +380,8 @@ class CoordinationService:
 
             tags = []
             if row["tags"]:
-                try:
+                with contextlib.suppress(json.JSONDecodeError):
                     tags = json.loads(row["tags"])
-                except json.JSONDecodeError:
-                    pass
 
             return Task(
                 id=row["id"],

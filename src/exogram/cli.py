@@ -25,10 +25,7 @@ def cli(ctx: click.Context, config: Path | None, data_dir: Path | None) -> None:
     ctx.ensure_object(dict)
 
     # Load configuration (load_config reads EXOGRAM_* env vars)
-    if config:
-        cfg = load_config(str(config))
-    else:
-        cfg = load_config()
+    cfg = load_config(str(config)) if config else load_config()
 
     # Override data directory if specified
     if data_dir:

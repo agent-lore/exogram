@@ -139,10 +139,7 @@ def parse_wiki_links(content: str) -> list[WikiLink]:
     for match in WIKI_LINK_PATTERN.finditer(content):
         target = match.group(1).strip()
         display = match.group(2)
-        if display:
-            display = display.strip()
-        else:
-            display = target  # Default display to target
+        display = display.strip() if display else target
         links.append(WikiLink(target=target, display=display))
     return links
 
@@ -262,10 +259,7 @@ class KnowledgeManager:
 
         # Determine file path
         slug = slugify(title)
-        if path:
-            file_path = Path(path) / f"{slug}.md"
-        else:
-            file_path = Path(f"{slug}.md")
+        file_path = Path(path) / f"{slug}.md" if path else Path(f"{slug}.md")
 
         # Parse wiki-links
         links = parse_wiki_links(content)
