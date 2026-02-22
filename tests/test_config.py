@@ -6,9 +6,9 @@ from pathlib import Path
 
 import yaml
 
-from exogram.config import (
+from lithos.config import (
     CoordinationConfig,
-    ExogramConfig,
+    LithosConfig,
     SearchConfig,
     ServerConfig,
     StorageConfig,
@@ -54,7 +54,7 @@ class TestConfigDefaults:
 
     def test_full_config_defaults(self):
         """Full config assembles all defaults."""
-        config = ExogramConfig()
+        config = LithosConfig()
 
         assert config.storage is not None
         assert config.search is not None
@@ -67,7 +67,7 @@ class TestConfigPaths:
 
     def test_knowledge_path_computed(self):
         """Knowledge path is computed from data_dir and subdir."""
-        config = ExogramConfig(
+        config = LithosConfig(
             storage=StorageConfig(
                 data_dir=Path("/custom/data"),
                 knowledge_subdir="docs",
@@ -79,7 +79,7 @@ class TestConfigPaths:
     def test_ensure_directories_creates_paths(self):
         """ensure_directories creates required directories."""
         with tempfile.TemporaryDirectory() as tmp:
-            config = ExogramConfig(storage=StorageConfig(data_dir=Path(tmp)))
+            config = LithosConfig(storage=StorageConfig(data_dir=Path(tmp)))
 
             config.ensure_directories()
 
@@ -150,24 +150,24 @@ class TestConfigEnvironment:
     """Tests for environment variable overrides."""
 
     def test_env_override_data_dir(self, monkeypatch):
-        """EXOGRAM_DATA_DIR overrides config."""
-        monkeypatch.setenv("EXOGRAM_DATA_DIR", "/env/data")
+        """LITHOS_DATA_DIR overrides config."""
+        monkeypatch.setenv("LITHOS_DATA_DIR", "/env/data")
 
         config = load_config()
 
         assert config.storage.data_dir == Path("/env/data")
 
     def test_env_override_port(self, monkeypatch):
-        """EXOGRAM_PORT overrides config."""
-        monkeypatch.setenv("EXOGRAM_PORT", "7777")
+        """LITHOS_PORT overrides config."""
+        monkeypatch.setenv("LITHOS_PORT", "7777")
 
         config = load_config()
 
         assert config.server.port == 7777
 
     def test_env_override_host(self, monkeypatch):
-        """EXOGRAM_HOST overrides config."""
-        monkeypatch.setenv("EXOGRAM_HOST", "127.0.0.1")
+        """LITHOS_HOST overrides config."""
+        monkeypatch.setenv("LITHOS_HOST", "127.0.0.1")
 
         config = load_config()
 
@@ -179,7 +179,7 @@ class TestConfigSingleton:
 
     def test_set_and_get_config(self):
         """set_config and get_config work together."""
-        custom_config = ExogramConfig(server=ServerConfig(port=5555))
+        custom_config = LithosConfig(server=ServerConfig(port=5555))
 
         set_config(custom_config)
         retrieved = get_config()
@@ -194,4 +194,4 @@ class TestConfigSingleton:
         config = get_config()
 
         assert config is not None
-        assert isinstance(config, ExogramConfig)
+        assert isinstance(config, LithosConfig)

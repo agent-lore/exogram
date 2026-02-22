@@ -2,11 +2,11 @@
 
 ## Project Overview
 
-Exogram is a local, privacy-first MCP server that provides a shared knowledge base for AI agents. Knowledge is stored as Obsidian-compatible Markdown files with YAML frontmatter, searchable via Tantivy (full-text) and ChromaDB (semantic). A NetworkX knowledge graph tracks `[[wiki-link]]` relationships. Agents coordinate via SQLite-backed task claiming and findings.
+Lithos is a local, privacy-first MCP server that provides a shared knowledge base for AI agents. Knowledge is stored as Obsidian-compatible Markdown files with YAML frontmatter, searchable via Tantivy (full-text) and ChromaDB (semantic). A NetworkX knowledge graph tracks `[[wiki-link]]` relationships. Agents coordinate via SQLite-backed task claiming and findings.
 
 ## Tech Stack
 
-- **Python 3.10+** with `src/exogram/` layout (hatchling build)
+- **Python 3.10+** with `src/lithos/` layout (hatchling build)
 - **FastMCP** for the MCP server interface (stdio and SSE transports)
 - **Tantivy** for full-text search, **ChromaDB + sentence-transformers** for semantic search
 - **NetworkX** for knowledge graph, **watchdog** for file sync
@@ -24,7 +24,7 @@ uv sync --extra dev
 uv run pytest tests/ -v --tb=short
 
 # Run tests with coverage
-uv run pytest tests/ --cov=exogram --cov-report=xml
+uv run pytest tests/ --cov=lithos --cov-report=xml
 
 # Lint
 uv run ruff check src/ tests/
@@ -36,10 +36,10 @@ uv run ruff format --check src/ tests/
 uv run ruff check --fix src/ tests/ && uv run ruff format src/ tests/
 
 # Start server (stdio)
-uv run exogram serve
+uv run lithos serve
 
 # Start server (SSE)
-uv run exogram serve --transport sse --port 8765
+uv run lithos serve --transport sse --port 8765
 
 # Docker
 cd docker && docker compose up -d --build
@@ -48,10 +48,10 @@ cd docker && docker compose up -d --build
 ## Project Structure
 
 ```
-src/exogram/
-  server.py       # ExogramServer: FastMCP app, tool registration, file watcher
+src/lithos/
+  server.py       # LithosServer: FastMCP app, tool registration, file watcher
   cli.py          # Click CLI: serve, reindex, validate, stats, search
-  config.py       # Pydantic config (ExogramConfig), env vars (EXOGRAM_* prefix)
+  config.py       # Pydantic config (LithosConfig), env vars (LITHOS_* prefix)
   knowledge.py    # KnowledgeManager: CRUD for markdown files with frontmatter
   search.py       # SearchEngine: Tantivy full-text + ChromaDB semantic search
   graph.py        # KnowledgeGraph: NetworkX graph of [[wiki-links]]
@@ -69,8 +69,8 @@ docker/
 - **Ruff** for linting and formatting (line-length 100, double quotes, spaces)
 - Lint rules: E, F, I (isort), UP, B, SIM, RUF
 - Async throughout: tests use `pytest-asyncio` with `asyncio_mode = "auto"`
-- All MCP tools prefixed `exo_` (e.g., `exo_write`, `exo_search`, `exo_task_create`)
-- Config via `ExogramConfig` pydantic-settings model; env vars use `EXOGRAM_` prefix
+- All MCP tools prefixed `lithos_` (e.g., `lithos_write`, `lithos_search`, `lithos_task_create`)
+- Config via `LithosConfig` pydantic-settings model; env vars use `LITHOS_` prefix
 - Tests use temp directories via `test_config` fixture; always clean up
 
 ## CI

@@ -4,14 +4,14 @@ import asyncio
 
 import pytest
 
-from exogram.server import ExogramServer
+from lithos.server import LithosServer
 
 
 class TestServerInitialization:
     """Tests for server startup and shutdown."""
 
     @pytest.mark.asyncio
-    async def test_server_initializes(self, server: ExogramServer):
+    async def test_server_initializes(self, server: LithosServer):
         """Server initializes all components."""
         assert server.knowledge is not None
         assert server.search is not None
@@ -19,7 +19,7 @@ class TestServerInitialization:
         assert server.coordination is not None
 
     @pytest.mark.asyncio
-    async def test_server_registers_tools(self, server: ExogramServer):
+    async def test_server_registers_tools(self, server: LithosServer):
         """Server registers all MCP tools."""
         # The server should have registered tools
         # Check by verifying the mcp app has tools
@@ -30,7 +30,7 @@ class TestKnowledgeToolWorkflow:
     """Integration tests for knowledge management tools."""
 
     @pytest.mark.asyncio
-    async def test_create_read_update_delete_workflow(self, server: ExogramServer):
+    async def test_create_read_update_delete_workflow(self, server: LithosServer):
         """Complete CRUD workflow through server."""
         # Create
         doc = await server.knowledge.create(
@@ -68,7 +68,7 @@ class TestKnowledgeToolWorkflow:
             await server.knowledge.read(id=doc_id)
 
     @pytest.mark.asyncio
-    async def test_create_with_wiki_links_updates_graph(self, server: ExogramServer):
+    async def test_create_with_wiki_links_updates_graph(self, server: LithosServer):
         """Creating document with links updates knowledge graph."""
         # Create target first
         target = await server.knowledge.create(
@@ -100,7 +100,7 @@ class TestSearchToolWorkflow:
     """Integration tests for search tools."""
 
     @pytest.mark.asyncio
-    async def test_full_text_search_finds_created_docs(self, server: ExogramServer):
+    async def test_full_text_search_finds_created_docs(self, server: LithosServer):
         """Full-text search finds newly created documents."""
         # Create searchable document
         doc = await server.knowledge.create(
@@ -118,7 +118,7 @@ class TestSearchToolWorkflow:
         assert any(r.id == doc.id for r in results)
 
     @pytest.mark.asyncio
-    async def test_semantic_search_finds_related_content(self, server: ExogramServer):
+    async def test_semantic_search_finds_related_content(self, server: LithosServer):
         """Semantic search finds conceptually related documents."""
         # Create document about error handling
         doc = await server.knowledge.create(
@@ -135,7 +135,7 @@ class TestSearchToolWorkflow:
         assert len(results) >= 1
 
     @pytest.mark.asyncio
-    async def test_search_respects_tag_filters(self, server: ExogramServer):
+    async def test_search_respects_tag_filters(self, server: LithosServer):
         """Search filters by tags correctly."""
         # Create docs with different tags
         python_doc = await server.knowledge.create(
@@ -165,7 +165,7 @@ class TestCoordinationToolWorkflow:
     """Integration tests for coordination tools."""
 
     @pytest.mark.asyncio
-    async def test_task_claim_workflow(self, server: ExogramServer):
+    async def test_task_claim_workflow(self, server: LithosServer):
         """Complete task claiming workflow."""
         # Register agents
         await server.coordination.register_agent(
@@ -225,7 +225,7 @@ class TestCoordinationToolWorkflow:
         assert task.status == "completed"
 
     @pytest.mark.asyncio
-    async def test_claim_conflict_resolution(self, server: ExogramServer):
+    async def test_claim_conflict_resolution(self, server: LithosServer):
         """Claim conflicts are properly handled."""
         task_id = await server.coordination.create_task(
             title="Contested Task",
@@ -269,7 +269,7 @@ class TestGraphToolWorkflow:
     """Integration tests for graph tools."""
 
     @pytest.mark.asyncio
-    async def test_build_and_query_knowledge_graph(self, server: ExogramServer):
+    async def test_build_and_query_knowledge_graph(self, server: LithosServer):
         """Build knowledge graph and query relationships."""
         # Create interconnected documents
         overview = await server.knowledge.create(
@@ -308,7 +308,7 @@ class TestGraphToolWorkflow:
         assert len(path) >= 2
 
     @pytest.mark.asyncio
-    async def test_orphan_detection(self, server: ExogramServer):
+    async def test_orphan_detection(self, server: LithosServer):
         """Detect orphaned documents."""
         # Create connected docs
         connected = await server.knowledge.create(
@@ -343,7 +343,7 @@ class TestEndToEndScenarios:
     """End-to-end integration scenarios."""
 
     @pytest.mark.asyncio
-    async def test_multi_agent_collaboration_scenario(self, server: ExogramServer):
+    async def test_multi_agent_collaboration_scenario(self, server: LithosServer):
         """Simulate multi-agent collaboration on a task."""
         # Setup: Register agents
         await server.coordination.register_agent(
@@ -445,7 +445,7 @@ Based on [[api-research-notes]].
         assert len(findings) >= 1
 
     @pytest.mark.asyncio
-    async def test_knowledge_discovery_scenario(self, server: ExogramServer):
+    async def test_knowledge_discovery_scenario(self, server: LithosServer):
         """Simulate knowledge discovery through search and graph."""
         # Create a knowledge base
         docs_data = [
@@ -497,7 +497,7 @@ Based on [[api-research-notes]].
         assert len(path) == 3
 
     @pytest.mark.asyncio
-    async def test_system_stats_aggregation(self, server: ExogramServer):
+    async def test_system_stats_aggregation(self, server: LithosServer):
         """Get comprehensive system statistics."""
         # Create some data
         for i in range(3):

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import frontmatter
 
-from exogram.config import get_config
+from lithos.config import get_config
 
 # Wiki-link pattern: [[target]] or [[target|display]]
 WIKI_LINK_PATTERN = re.compile(r"\[\[([^\]\[|]*[a-zA-Z][^\]\[|]*)(?:\|([^\]]+))?\]\]")

@@ -2,8 +2,8 @@
 
 import pytest
 
-from exogram.knowledge import KnowledgeManager
-from exogram.search import (
+from lithos.knowledge import KnowledgeManager
+from lithos.search import (
     SearchEngine,
     chunk_text,
 )

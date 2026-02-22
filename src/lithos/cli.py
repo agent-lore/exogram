@@ -1,11 +1,11 @@
-"""Exogram CLI - Command-line interface."""
+"""Lithos CLI - Command-line interface."""
 
 import asyncio
 from pathlib import Path
 
 import click
 
-from exogram.config import ExogramConfig, load_config, set_config
+from lithos.config import LithosConfig, load_config, set_config
 
 
 @click.group()
@@ -23,10 +23,10 @@ from exogram.config import ExogramConfig, load_config, set_config
 )
 @click.pass_context
 def cli(ctx: click.Context, config: Path | None, data_dir: Path | None) -> None:
-    """Exogram - Local shared knowledge base for AI agents."""
+    """Lithos - Local shared knowledge base for AI agents."""
     ctx.ensure_object(dict)
 
-    # Load configuration (load_config reads EXOGRAM_* env vars)
+    # Load configuration (load_config reads LITHOS_* env vars)
     cfg = load_config(str(config)) if config else load_config()
 
     # Override data directory if specified
@@ -70,15 +70,15 @@ def serve(
     port: int,
     watch: bool,
 ) -> None:
-    """Start the Exogram MCP server."""
-    from exogram.server import create_server
+    """Start the Lithos MCP server."""
+    from lithos.server import create_server
 
-    config: ExogramConfig = ctx.obj["config"]
+    config: LithosConfig = ctx.obj["config"]
     server = create_server(config)
 
     async def run_server() -> None:
         # Initialize server
-        click.echo("Initializing Exogram...")
+        click.echo("Initializing Lithos...")
         await server.initialize()
 
         # Start file watcher if enabled
@@ -118,11 +118,11 @@ def serve(
 @click.pass_context
 def reindex(ctx: click.Context, clear: bool) -> None:
     """Rebuild search indices from knowledge files."""
-    from exogram.graph import KnowledgeGraph
-    from exogram.knowledge import KnowledgeManager
-    from exogram.search import SearchEngine
+    from lithos.graph import KnowledgeGraph
+    from lithos.knowledge import KnowledgeManager
+    from lithos.search import SearchEngine
 
-    config: ExogramConfig = ctx.obj["config"]
+    config: LithosConfig = ctx.obj["config"]
     config.ensure_directories()
 
     knowledge = KnowledgeManager()
@@ -180,10 +180,10 @@ def reindex(ctx: click.Context, clear: bool) -> None:
 @click.pass_context
 def validate(ctx: click.Context, fix: bool) -> None:
     """Validate knowledge base integrity."""
-    from exogram.graph import KnowledgeGraph
-    from exogram.knowledge import KnowledgeManager
+    from lithos.graph import KnowledgeGraph
+    from lithos.knowledge import KnowledgeManager
 
-    config: ExogramConfig = ctx.obj["config"]
+    config: LithosConfig = ctx.obj["config"]
     config.ensure_directories()
 
     knowledge = KnowledgeManager()
@@ -277,7 +277,7 @@ def validate(ctx: click.Context, fix: bool) -> None:
                     # Re-save will add ID if missing
                     await knowledge.update(
                         id=doc.id,
-                        agent="exogram-cli",
+                        agent="lithos-cli",
                     )
                     fixed += 1
                 except Exception:
@@ -292,12 +292,12 @@ def validate(ctx: click.Context, fix: bool) -> None:
 @click.pass_context
 def stats(ctx: click.Context) -> None:
     """Show knowledge base statistics."""
-    from exogram.coordination import CoordinationService
-    from exogram.graph import KnowledgeGraph
-    from exogram.knowledge import KnowledgeManager
-    from exogram.search import SearchEngine
+    from lithos.coordination import CoordinationService
+    from lithos.graph import KnowledgeGraph
+    from lithos.knowledge import KnowledgeManager
+    from lithos.search import SearchEngine
 
-    config: ExogramConfig = ctx.obj["config"]
+    config: LithosConfig = ctx.obj["config"]
 
     knowledge = KnowledgeManager()
     search = SearchEngine(config)
@@ -317,7 +317,7 @@ def stats(ctx: click.Context) -> None:
         coord_stats = await coordination.get_stats()
         tags = await knowledge.get_all_tags()
 
-        click.echo("Exogram Statistics")
+        click.echo("Lithos Statistics")
         click.echo("=" * 40)
         click.echo(f"Documents:     {total_docs}")
         click.echo(f"Search chunks: {search_stats.get('chunks', 0)}")
@@ -350,9 +350,9 @@ def stats(ctx: click.Context) -> None:
 @click.pass_context
 def search(ctx: click.Context, query: str, semantic: bool, limit: int) -> None:
     """Search the knowledge base."""
-    from exogram.search import SearchEngine
+    from lithos.search import SearchEngine
 
-    config: ExogramConfig = ctx.obj["config"]
+    config: LithosConfig = ctx.obj["config"]
     engine = SearchEngine(config)
 
     if semantic:

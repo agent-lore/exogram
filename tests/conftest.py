@@ -9,12 +9,12 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
-from exogram.config import ExogramConfig, StorageConfig, set_config
-from exogram.coordination import CoordinationService
-from exogram.graph import KnowledgeGraph
-from exogram.knowledge import KnowledgeManager
-from exogram.search import SearchEngine
-from exogram.server import ExogramServer
+from lithos.config import LithosConfig, StorageConfig, set_config
+from lithos.coordination import CoordinationService
+from lithos.graph import KnowledgeGraph
+from lithos.knowledge import KnowledgeManager
+from lithos.search import SearchEngine
+from lithos.server import LithosServer
 
 
 @pytest.fixture(scope="session")
@@ -34,9 +34,9 @@ def temp_dir() -> Generator[Path, None, None]:
 
 
 @pytest.fixture
-def test_config(temp_dir: Path) -> ExogramConfig:
+def test_config(temp_dir: Path) -> LithosConfig:
     """Create test configuration with temporary directories."""
-    config = ExogramConfig(
+    config = LithosConfig(
         storage=StorageConfig(data_dir=temp_dir),
     )
     config.ensure_directories()
@@ -45,26 +45,26 @@ def test_config(temp_dir: Path) -> ExogramConfig:
 
 
 @pytest.fixture
-def knowledge_manager(test_config: ExogramConfig) -> KnowledgeManager:
+def knowledge_manager(test_config: LithosConfig) -> KnowledgeManager:
     """Create knowledge manager for testing."""
     return KnowledgeManager()
 
 
 @pytest.fixture
-def search_engine(test_config: ExogramConfig) -> SearchEngine:
+def search_engine(test_config: LithosConfig) -> SearchEngine:
     """Create search engine for testing."""
     return SearchEngine(test_config)
 
 
 @pytest.fixture
-def knowledge_graph(test_config: ExogramConfig) -> KnowledgeGraph:
+def knowledge_graph(test_config: LithosConfig) -> KnowledgeGraph:
     """Create knowledge graph for testing."""
     return KnowledgeGraph(test_config)
 
 
 @pytest_asyncio.fixture
 async def coordination_service(
-    test_config: ExogramConfig,
+    test_config: LithosConfig,
 ) -> AsyncGenerator[CoordinationService, None]:
     """Create coordination service for testing."""
     service = CoordinationService(test_config)
@@ -73,9 +73,9 @@ async def coordination_service(
 
 
 @pytest_asyncio.fixture
-async def server(test_config: ExogramConfig) -> AsyncGenerator[ExogramServer, None]:
+async def server(test_config: LithosConfig) -> AsyncGenerator[LithosServer, None]:
     """Create server for integration testing."""
-    srv = ExogramServer(test_config)
+    srv = LithosServer(test_config)
     await srv.initialize()
     yield srv
     srv.stop_file_watcher()

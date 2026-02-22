@@ -7,8 +7,8 @@ from typing import Literal
 
 import networkx as nx
 
-from exogram.config import ExogramConfig, get_config
-from exogram.knowledge import KnowledgeDocument
+from lithos.config import LithosConfig, get_config
+from lithos.knowledge import KnowledgeDocument
 
 
 @dataclass
@@ -30,7 +30,7 @@ class LinkInfo:
 class KnowledgeGraph:
     """NetworkX-based knowledge graph for wiki-links."""
 
-    def __init__(self, config: ExogramConfig | None = None):
+    def __init__(self, config: LithosConfig | None = None):
         """Initialize knowledge graph.
 
         Args:
@@ -45,7 +45,7 @@ class KnowledgeGraph:
         self._alias_to_node: dict[str, str] = {}  # alias -> node_id
 
     @property
-    def config(self) -> ExogramConfig:
+    def config(self) -> LithosConfig:
         """Get configuration."""
         return self._config or get_config()
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from exogram.knowledge import (
+from lithos.knowledge import (
     KnowledgeManager,
     generate_slug,
     parse_wiki_links,
