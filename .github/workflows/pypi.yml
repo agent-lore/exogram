@@ -100,7 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: testpypi
-      url: https://test.pypi.org/p/lithos
+      url: https://test.pypi.org/p/lithos-mcp
 
     permissions:
       id-token: write
@@ -126,7 +126,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/lithos
+      url: https://pypi.org/p/lithos-mcp
 
     permissions:
       id-token: write
@@ -157,7 +157,7 @@ jobs:
               release_id: context.payload.release.id
             });
 
-            const pypiInfo = `\n\n---\n\n🎉 **Published to PyPI!**\n\nInstall with:\n\`\`\`bash\npip install lithos==${version}\n\`\`\``;
+            const pypiInfo = `\n\n---\n\n🎉 **Published to PyPI!**\n\nInstall with:\n\`\`\`bash\npip install lithos-mcp==${version}\n\`\`\``;
 
             const updatedBody = (release.data.body || '') + pypiInfo;
 
