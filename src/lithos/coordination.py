@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 import aiosqlite
 
-from exogram.config import ExogramConfig, get_config
+from lithos.config import LithosConfig, get_config
 
 # SQL Schema
 SCHEMA = """
@@ -149,7 +149,7 @@ def _format_datetime(dt: datetime) -> str:
 class CoordinationService:
     """SQLite-based coordination service."""
 
-    def __init__(self, config: ExogramConfig | None = None):
+    def __init__(self, config: LithosConfig | None = None):
         """Initialize coordination service.
 
         Args:
@@ -159,7 +159,7 @@ class CoordinationService:
         self._db_path: Path | None = None
 
     @property
-    def config(self) -> ExogramConfig:
+    def config(self) -> LithosConfig:
         """Get configuration."""
         return self._config or get_config()
 

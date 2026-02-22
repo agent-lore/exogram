@@ -1,4 +1,4 @@
-"""Exogram MCP Server - FastMCP server exposing all tools."""
+"""Lithos MCP Server - FastMCP server exposing all tools."""
 
 import asyncio
 from datetime import datetime
@@ -9,17 +9,17 @@ from fastmcp import FastMCP
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
-from exogram.config import ExogramConfig, get_config, set_config
-from exogram.coordination import CoordinationService
-from exogram.graph import KnowledgeGraph
-from exogram.knowledge import KnowledgeManager
-from exogram.search import SearchEngine
+from lithos.config import LithosConfig, get_config, set_config
+from lithos.coordination import CoordinationService
+from lithos.graph import KnowledgeGraph
+from lithos.knowledge import KnowledgeManager
+from lithos.search import SearchEngine
 
 
-class ExogramServer:
-    """Exogram MCP Server."""
+class LithosServer:
+    """Lithos MCP Server."""
 
-    def __init__(self, config: ExogramConfig | None = None):
+    def __init__(self, config: LithosConfig | None = None):
         """Initialize server.
 
         Args:
@@ -41,7 +41,7 @@ class ExogramServer:
 
         # Create FastMCP app
         self.mcp = FastMCP(
-            "Exogram",
+            "Lithos",
             instructions="Local shared knowledge base for AI agents",
         )
 
@@ -49,7 +49,7 @@ class ExogramServer:
         self._register_tools()
 
     @property
-    def config(self) -> ExogramConfig:
+    def config(self) -> LithosConfig:
         """Get configuration."""
         return self._config
 
@@ -136,7 +136,7 @@ class ExogramServer:
         # ==================== Knowledge Tools ====================
 
         @self.mcp.tool()
-        async def exo_write(
+        async def lithos_write(
             title: str,
             content: str,
             agent: str,
@@ -195,7 +195,7 @@ class ExogramServer:
             return {"id": doc.id, "path": str(doc.path)}
 
         @self.mcp.tool()
-        async def exo_read(
+        async def lithos_read(
             id: str | None = None,
             path: str | None = None,
             max_length: int | None = None,
@@ -226,7 +226,7 @@ class ExogramServer:
             }
 
         @self.mcp.tool()
-        async def exo_delete(
+        async def lithos_delete(
             id: str,
             agent: str | None = None,
         ) -> dict[str, bool]:
@@ -252,7 +252,7 @@ class ExogramServer:
             return {"success": success}
 
         @self.mcp.tool()
-        async def exo_search(
+        async def lithos_search(
             query: str,
             limit: int = 10,
             tags: list[str] | None = None,
@@ -293,7 +293,7 @@ class ExogramServer:
             }
 
         @self.mcp.tool()
-        async def exo_semantic(
+        async def lithos_semantic(
             query: str,
             limit: int = 10,
             threshold: float | None = None,
@@ -331,7 +331,7 @@ class ExogramServer:
             }
 
         @self.mcp.tool()
-        async def exo_list(
+        async def lithos_list(
             path_prefix: str | None = None,
             tags: list[str] | None = None,
             author: str | None = None,
@@ -382,7 +382,7 @@ class ExogramServer:
         # ==================== Graph Tools ====================
 
         @self.mcp.tool()
-        async def exo_links(
+        async def lithos_links(
             id: str,
             direction: str = "both",
             depth: int = 1,
@@ -412,7 +412,7 @@ class ExogramServer:
             }
 
         @self.mcp.tool()
-        async def exo_tags() -> dict[str, dict[str, int]]:
+        async def lithos_tags() -> dict[str, dict[str, int]]:
             """Get all tags with document counts.
 
             Returns:
@@ -424,7 +424,7 @@ class ExogramServer:
         # ==================== Agent Tools ====================
 
         @self.mcp.tool()
-        async def exo_agent_register(
+        async def lithos_agent_register(
             id: str,
             name: str | None = None,
             type: str | None = None,
@@ -450,7 +450,7 @@ class ExogramServer:
             return {"success": success, "created": created}
 
         @self.mcp.tool()
-        async def exo_agent_info(
+        async def lithos_agent_info(
             id: str,
         ) -> dict[str, Any] | None:
             """Get agent information.
@@ -475,7 +475,7 @@ class ExogramServer:
             }
 
         @self.mcp.tool()
-        async def exo_agent_list(
+        async def lithos_agent_list(
             type: str | None = None,
             active_since: str | None = None,
         ) -> dict[str, list[dict[str, Any]]]:
@@ -512,7 +512,7 @@ class ExogramServer:
         # ==================== Coordination Tools ====================
 
         @self.mcp.tool()
-        async def exo_task_create(
+        async def lithos_task_create(
             title: str,
             agent: str,
             description: str | None = None,
@@ -538,7 +538,7 @@ class ExogramServer:
             return {"task_id": task_id}
 
         @self.mcp.tool()
-        async def exo_task_claim(
+        async def lithos_task_claim(
             task_id: str,
             aspect: str,
             agent: str,
@@ -567,7 +567,7 @@ class ExogramServer:
             }
 
         @self.mcp.tool()
-        async def exo_task_renew(
+        async def lithos_task_renew(
             task_id: str,
             aspect: str,
             agent: str,
@@ -596,7 +596,7 @@ class ExogramServer:
             }
 
         @self.mcp.tool()
-        async def exo_task_release(
+        async def lithos_task_release(
             task_id: str,
             aspect: str,
             agent: str,
@@ -619,7 +619,7 @@ class ExogramServer:
             return {"success": success}
 
         @self.mcp.tool()
-        async def exo_task_complete(
+        async def lithos_task_complete(
             task_id: str,
             agent: str,
         ) -> dict[str, bool]:
@@ -639,7 +639,7 @@ class ExogramServer:
             return {"success": success}
 
         @self.mcp.tool()
-        async def exo_task_status(
+        async def lithos_task_status(
             task_id: str | None = None,
         ) -> dict[str, list[dict[str, Any]]]:
             """Get task status with active claims.
@@ -672,7 +672,7 @@ class ExogramServer:
             }
 
         @self.mcp.tool()
-        async def exo_finding_post(
+        async def lithos_finding_post(
             task_id: str,
             agent: str,
             summary: str,
@@ -698,7 +698,7 @@ class ExogramServer:
             return {"finding_id": finding_id}
 
         @self.mcp.tool()
-        async def exo_finding_list(
+        async def lithos_finding_list(
             task_id: str,
             since: str | None = None,
         ) -> dict[str, list[dict[str, Any]]]:
@@ -736,7 +736,7 @@ class ExogramServer:
         # ==================== System Tools ====================
 
         @self.mcp.tool()
-        async def exo_stats() -> dict[str, int]:
+        async def lithos_stats() -> dict[str, int]:
             """Get knowledge base statistics.
 
             Returns:
@@ -767,7 +767,7 @@ class ExogramServer:
 class _FileChangeHandler(FileSystemEventHandler):
     """Handle file system events for index updates."""
 
-    def __init__(self, server: ExogramServer):
+    def __init__(self, server: LithosServer):
         self.server = server
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -803,19 +803,19 @@ class _FileChangeHandler(FileSystemEventHandler):
 
 
 # Global server instance
-_server: ExogramServer | None = None
+_server: LithosServer | None = None
 
 
-def get_server() -> ExogramServer:
+def get_server() -> LithosServer:
     """Get or create the global server instance."""
     global _server
     if _server is None:
-        _server = ExogramServer()
+        _server = LithosServer()
     return _server
 
 
-def create_server(config: ExogramConfig | None = None) -> ExogramServer:
+def create_server(config: LithosConfig | None = None) -> LithosServer:
     """Create a new server instance."""
     global _server
-    _server = ExogramServer(config)
+    _server = LithosServer(config)
     return _server

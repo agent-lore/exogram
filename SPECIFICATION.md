@@ -1,4 +1,4 @@
-# Exogram - Specification
+# Lithos - Specification
 
 Version: 0.3.0-draft  
 Date: 2026-02-03  
@@ -34,7 +34,7 @@ Status: Implementation Ready
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                          Exogram                                 │
+│                          Lithos                                 │
 │                                                                  │
 │  ┌─────────────────────────────────────────────────────────┐    │
 │  │                    MCP Server (FastMCP)                  │    │
@@ -199,7 +199,7 @@ Supports all standard Markdown:
 
 ### 4.1 Identity Model
 
-Exogram uses a **hybrid agent identity** scheme:
+Lithos uses a **hybrid agent identity** scheme:
 
 - Agent IDs are **free-form strings** (no mandatory registration)
 - System **auto-registers** agents on first interaction
@@ -222,7 +222,7 @@ CREATE TABLE agents (
 
 ### 4.3 Auto-Registration Behavior
 
-On any operation requiring an agent ID (`exo_write`, `exo_task_claim`, etc.):
+On any operation requiring an agent ID (`lithos_write`, `lithos_task_claim`, etc.):
 
 ```python
 def ensure_agent_known(agent_id: str):
@@ -238,7 +238,7 @@ def ensure_agent_known(agent_id: str):
 
 ### 5.1 Knowledge Operations
 
-#### `exo_write`
+#### `lithos_write`
 Create or update a knowledge file.
 
 **Arguments:**
@@ -258,7 +258,7 @@ Create or update a knowledge file.
 
 **Behavior on update:** If `id` is provided and exists, the agent is added to `contributors` if not already present.
 
-#### `exo_read`
+#### `lithos_read`
 Read a knowledge file by ID or path.
 
 **Arguments:**
@@ -274,7 +274,7 @@ Read a knowledge file by ID or path.
 
 **Truncation behavior:** When `max_length` is specified, content is truncated at the nearest paragraph or sentence boundary at or before the limit. Returns `truncated: true` if content was shortened.
 
-#### `exo_delete`
+#### `lithos_delete`
 Delete a knowledge file.
 
 **Arguments:**
@@ -285,7 +285,7 @@ Delete a knowledge file.
 
 **Returns:** `{ success: boolean }`
 
-#### `exo_search`
+#### `lithos_search`
 Full-text search across knowledge base.
 
 **Arguments:**
@@ -301,7 +301,7 @@ Full-text search across knowledge base.
 
 **Snippet source:** Tantivy-generated highlight showing matching terms in context.
 
-#### `exo_semantic`
+#### `lithos_semantic`
 Semantic similarity search.
 
 **Arguments:**
@@ -318,7 +318,7 @@ Semantic similarity search.
 
 **Note:** Search operates on chunks internally but returns deduplicated documents.
 
-#### `exo_list`
+#### `lithos_list`
 List knowledge items with filters.
 
 **Arguments:**
@@ -335,7 +335,7 @@ List knowledge items with filters.
 
 ### 5.2 Graph Operations
 
-#### `exo_links`
+#### `lithos_links`
 Get links for a knowledge item.
 
 **Arguments:**
@@ -349,7 +349,7 @@ Get links for a knowledge item.
 
 **Multi-hop behavior:** Returns flat lists regardless of depth. For `depth > 1`, results include all reachable nodes within N hops, deduplicated. Path information is not preserved.
 
-#### `exo_tags`
+#### `lithos_tags`
 List all tags or items with specific tags.
 
 **Arguments:**
@@ -361,7 +361,7 @@ List all tags or items with specific tags.
 
 ### 5.3 Agent Operations
 
-#### `exo_agent_register`
+#### `lithos_agent_register`
 Explicitly register an agent with metadata (optional, agents are auto-registered on first use).
 
 **Arguments:**
@@ -378,7 +378,7 @@ Explicitly register an agent with metadata (optional, agents are auto-registered
 - `{ success: true, created: true }` — New agent registered
 - `{ success: true, created: false }` — Agent already existed, metadata updated, `last_seen_at` refreshed
 
-#### `exo_agent_info`
+#### `lithos_agent_info`
 Get information about an agent.
 
 **Arguments:**
@@ -388,7 +388,7 @@ Get information about an agent.
 
 **Returns:** `{ id, name, type, first_seen_at, last_seen_at, metadata }`
 
-#### `exo_agent_list`
+#### `lithos_agent_list`
 List all known agents.
 
 **Arguments:**
@@ -401,7 +401,7 @@ List all known agents.
 
 ### 5.4 Coordination Operations
 
-#### `exo_task_create`
+#### `lithos_task_create`
 Create a coordination task.
 
 **Arguments:**
@@ -414,7 +414,7 @@ Create a coordination task.
 
 **Returns:** `{ task_id: string }`
 
-#### `exo_task_claim`
+#### `lithos_task_claim`
 Claim an aspect of a task.
 
 **Arguments:**
@@ -427,7 +427,7 @@ Claim an aspect of a task.
 
 **Returns:** `{ success: boolean, expires_at: string }`
 
-#### `exo_task_renew`
+#### `lithos_task_renew`
 Extend an existing task claim.
 
 **Arguments:**
@@ -442,7 +442,7 @@ Extend an existing task claim.
 
 **Note:** Only the agent holding the claim can renew it.
 
-#### `exo_task_release`
+#### `lithos_task_release`
 Release a task claim.
 
 **Arguments:**
@@ -454,7 +454,7 @@ Release a task claim.
 
 **Returns:** `{ success: boolean }`
 
-#### `exo_task_complete`
+#### `lithos_task_complete`
 Mark a task as completed.
 
 **Arguments:**
@@ -467,7 +467,7 @@ Mark a task as completed.
 
 **Behavior:** Sets task status to 'completed' and releases all active claims on the task.
 
-#### `exo_task_status`
+#### `lithos_task_status`
 Get task status and claims.
 
 **Arguments:**
@@ -479,7 +479,7 @@ Get task status and claims.
 
 **Claim expiry handling:** Expired claims (where `expires_at < now()`) are automatically excluded from results. Cleanup is lazy—expired claims are filtered at query time rather than eagerly deleted.
 
-#### `exo_finding_post`
+#### `lithos_finding_post`
 Post a finding to a task.
 
 **Arguments:**
@@ -492,7 +492,7 @@ Post a finding to a task.
 
 **Returns:** `{ finding_id: string }`
 
-#### `exo_finding_list`
+#### `lithos_finding_list`
 List findings for a task.
 
 **Arguments:**
@@ -505,7 +505,7 @@ List findings for a task.
 
 ### 5.5 System Operations
 
-#### `exo_stats`
+#### `lithos_stats`
 Get knowledge base statistics.
 
 **Arguments:** None
@@ -541,7 +541,7 @@ Get knowledge base statistics.
 5. Load coordination state from `coordination.db`
 6. Start file watcher
 
-**Full rebuild** only when forced via `exogram reindex --force`.
+**Full rebuild** only when forced via `lithos reindex --force`.
 
 ### 6.2 File Change Handling
 
@@ -552,7 +552,7 @@ Get knowledge base statistics.
 | File deleted | Remove from all indices |
 | File moved/renamed | Parse new file, match by UUID in frontmatter, update path in indices |
 
-**Note on renames and wiki-links:** When a file is renamed, UUID matching preserves identity in indices. However, wiki-link text in *other* files still points to the old path. `exogram validate` reports these as broken links.
+**Note on renames and wiki-links:** When a file is renamed, UUID matching preserves identity in indices. However, wiki-link text in *other* files still points to the old path. `lithos validate` reports these as broken links.
 
 ### 6.3 Index Persistence
 
@@ -655,19 +655,19 @@ index:
 
 ```bash
 # Run with stdio transport (for MCP)
-exogram serve --transport stdio --data-dir ./data
+lithos serve --transport stdio --data-dir ./data
 
 # Run with SSE transport (for HTTP access)
-exogram serve --transport sse --host 127.0.0.1 --port 8765 --data-dir ./data
+lithos serve --transport sse --host 127.0.0.1 --port 8765 --data-dir ./data
 
 # Rebuild indices (incremental by default)
-exogram reindex --data-dir ./data
+lithos reindex --data-dir ./data
 
 # Force full rebuild
-exogram reindex --data-dir ./data --force
+lithos reindex --data-dir ./data --force
 
 # Validate knowledge files
-exogram validate --data-dir ./data
+lithos validate --data-dir ./data
 # Reports: broken [[wiki-links]], missing frontmatter, ambiguous links, stale references after renames
 ```
 
@@ -720,8 +720,8 @@ All tools return errors in MCP-standard format:
 - [ ] Works with Agent Zero via MCP (stdio)
 - [ ] Works with OpenClaw via MCP (SSE)
 - [ ] Knowledge files readable in Obsidian without modification
-- [ ] `exogram validate` reports broken wiki-links including stale references after renames
-- [ ] `exo_stats` returns accurate counts
+- [ ] `lithos validate` reports broken wiki-links including stale references after renames
+- [ ] `lithos_stats` returns accurate counts
 
 ### 10.2 Non-Functional Requirements
 
@@ -762,9 +762,9 @@ aiosqlite>=0.17.0        # Async SQLite access
 ### 12.1 Project Structure
 
 ```
-exogram/
+lithos/
 ├── src/
-│   └── exogram/
+│   └── lithos/
 │       ├── __init__.py
 │       ├── server.py          # FastMCP server entry point
 │       ├── knowledge.py       # Knowledge CRUD operations
@@ -797,7 +797,7 @@ exogram/
 
 ### 12.2 Build System: Hatch
 
-Exogram uses [Hatch](https://hatch.pypa.io/) as the build system:
+Lithos uses [Hatch](https://hatch.pypa.io/) as the build system:
 
 - PEP 517/621 compliant
 - Manages project metadata in `pyproject.toml`
@@ -811,7 +811,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "exogram"
+name = "lithos"
 version = "0.1.0"
 description = "Local shared knowledge base for AI agents"
 readme = "README.md"
@@ -850,10 +850,10 @@ dev = [
 ]
 
 [project.scripts]
-exogram = "exogram.cli:main"
+lithos = "lithos.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/exogram"]
+packages = ["src/lithos"]
 
 [tool.hatch.envs.default]
 installer = "uv"
@@ -861,7 +861,7 @@ installer = "uv"
 
 ### 12.3 Dependency Management: uv
 
-Exogram uses [uv](https://github.com/astral-sh/uv) for fast dependency management:
+Lithos uses [uv](https://github.com/astral-sh/uv) for fast dependency management:
 
 - 10-100x faster than pip
 - Drop-in pip replacement
@@ -890,7 +890,7 @@ uv pip install <package>
 
 ### 12.4 Code Quality: Ruff
 
-Exogram uses [Ruff](https://github.com/astral-sh/ruff) for linting and formatting:
+Lithos uses [Ruff](https://github.com/astral-sh/ruff) for linting and formatting:
 
 - Extremely fast (Rust-based)
 - Replaces black, flake8, isort, and more
@@ -918,7 +918,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["exogram"]
+known-first-party = ["lithos"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -944,7 +944,7 @@ ruff format --check src/ tests/
 
 ### 12.5 Docker Deployment
 
-Exogram runs in Docker for consistent deployment, matching Agent Zero's setup.
+Lithos runs in Docker for consistent deployment, matching Agent Zero's setup.
 
 **Dockerfile:**
 
@@ -967,7 +967,7 @@ RUN uv venv /opt/venv &&     . /opt/venv/bin/activate &&     uv pip sync uv.lock
 
 # Set environment
 ENV PATH="/opt/venv/bin:$PATH"
-ENV EXOGRAM_DATA_DIR=/data
+ENV LITHOS_DATA_DIR=/data
 
 # Create data directory
 RUN mkdir -p /data/knowledge
@@ -979,7 +979,7 @@ EXPOSE 8765
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8765/health')" || exit 1
 
 # Run server
-CMD ["exogram", "serve", "--transport", "sse", "--host", "0.0.0.0", "--port", "8765"]
+CMD ["lithos", "serve", "--transport", "sse", "--host", "0.0.0.0", "--port", "8765"]
 ```
 
 **docker-compose.yml:**
@@ -989,21 +989,21 @@ CMD ["exogram", "serve", "--transport", "sse", "--host", "0.0.0.0", "--port", "8
 version: "3.8"
 
 services:
-  exogram:
+  lithos:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: exogram
+    container_name: lithos
     restart: unless-stopped
     volumes:
-      - exogram-data:/data
+      - lithos-data:/data
     ports:
       - "8765:8765"
     environment:
-      - EXOGRAM_DATA_DIR=/data
-      - EXOGRAM_TRANSPORT=sse
-      - EXOGRAM_HOST=0.0.0.0
-      - EXOGRAM_PORT=8765
+      - LITHOS_DATA_DIR=/data
+      - LITHOS_TRANSPORT=sse
+      - LITHOS_HOST=0.0.0.0
+      - LITHOS_PORT=8765
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/health')"]
       interval: 30s
@@ -1012,7 +1012,7 @@ services:
       start_period: 10s
 
 volumes:
-  exogram-data:
+  lithos-data:
     driver: local
 ```
 
@@ -1024,7 +1024,7 @@ cd docker
 docker-compose up -d --build
 
 # View logs
-docker-compose logs -f exogram
+docker-compose logs -f lithos
 
 # Stop
 docker-compose down
@@ -1035,7 +1035,7 @@ docker-compose down -v
 
 ### 12.6 Integration with Agent Zero
 
-To connect Exogram with Agent Zero running in Docker:
+To connect Lithos with Agent Zero running in Docker:
 
 ```yaml
 # docker-compose.yml (combined setup)
@@ -1049,24 +1049,24 @@ services:
     volumes:
       - ./a0-data:/a0
     environment:
-      - MCP_SERVERS=exogram:http://exogram:8765
+      - MCP_SERVERS=lithos:http://lithos:8765
     depends_on:
-      - exogram
+      - lithos
 
-  exogram:
+  lithos:
     build:
-      context: ./exogram
+      context: ./lithos
       dockerfile: docker/Dockerfile
     volumes:
-      - exogram-data:/data
+      - lithos-data:/data
     expose:
       - "8765"
     environment:
-      - EXOGRAM_TRANSPORT=sse
-      - EXOGRAM_HOST=0.0.0.0
+      - LITHOS_TRANSPORT=sse
+      - LITHOS_HOST=0.0.0.0
 
 volumes:
-  exogram-data:
+  lithos-data:
 ```
 
 ### 12.7 CI/CD
@@ -1114,7 +1114,7 @@ jobs:
       - name: Run tests
         run: |
           source .venv/bin/activate
-          pytest tests/ -v --cov=exogram --cov-report=xml
+          pytest tests/ -v --cov=lithos --cov-report=xml
       - name: Upload coverage
         uses: codecov/codecov-action@v3
         with:
@@ -1125,21 +1125,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build Docker image
-        run: docker build -f docker/Dockerfile -t exogram:test .
+        run: docker build -f docker/Dockerfile -t lithos:test .
       - name: Test Docker image
         run: |
-          docker run -d --name exogram-test -p 8765:8765 exogram:test
+          docker run -d --name lithos-test -p 8765:8765 lithos:test
           sleep 10
           curl -f http://localhost:8765/health || exit 1
-          docker stop exogram-test
+          docker stop lithos-test
 ```
 
 ### 12.8 Development Workflow
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/yourname/exogram.git
-cd exogram
+git clone https://github.com/yourname/lithos.git
+cd lithos
 
 # 2. Install uv (if needed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -1157,7 +1157,7 @@ ruff format src/ tests/
 pytest tests/ -v
 
 # 6. Run locally
-exogram serve --transport stdio
+lithos serve --transport stdio
 
 # 7. Run in Docker
 cd docker
@@ -1180,7 +1180,7 @@ These are explicitly not part of the initial implementation but may be considere
 - Contradictory knowledge resolution
 - Integration with external knowledge sources
 - Full edit history / provenance log
-- `exo_task_cancel` tool
+- `lithos_task_cancel` tool
 - Hierarchical multi-hop link results
 
 ---
@@ -1189,51 +1189,51 @@ These are explicitly not part of the initial implementation but may be considere
 
 ```
 # Check knowledge base stats
-→ exo_stats()
+→ lithos_stats()
 ← { documents: 0, chunks: 0, agents: 0, active_tasks: 0, open_claims: 0, tags: 0 }
 
 # Agent Zero registers (optional, would auto-register anyway)
-→ exo_agent_register(id="agent-zero", name="Agent Zero", type="agent-zero")
+→ lithos_agent_register(id="agent-zero", name="Agent Zero", type="agent-zero")
 ← { success: true, created: true }
 
 # Agent Zero stores a discovery
-→ exo_write(title="Python asyncio.gather patterns", content="...", tags=["python", "async"], agent="agent-zero")
+→ lithos_write(title="Python asyncio.gather patterns", content="...", tags=["python", "async"], agent="agent-zero")
 ← { id: "abc-123", path: "python-asyncio-gather-patterns.md" }
 
 # OpenClaw searches for async knowledge (semantic search uses chunks internally)
-→ exo_semantic(query="how to run async tasks concurrently in python")
+→ lithos_semantic(query="how to run async tasks concurrently in python")
 ← { results: [{ id: "abc-123", title: "Python asyncio.gather patterns", similarity: 0.89, snippet: "...best matching chunk..." }] }
 
 # OpenClaw reads with truncation to avoid context flooding
-→ exo_read(id="abc-123", max_length=2000)
+→ lithos_read(id="abc-123", max_length=2000)
 ← { id: "abc-123", title: "...", content: "...[truncated at sentence boundary]", truncated: true }
 
 # Create a research task
-→ exo_task_create(title="Research async patterns", agent="agent-zero")
+→ lithos_task_create(title="Research async patterns", agent="agent-zero")
 ← { task_id: "task-456" }
 
 # Agent claims research task
-→ exo_task_claim(task_id="task-456", aspect="literature review", agent="agent-zero")
+→ lithos_task_claim(task_id="task-456", aspect="literature review", agent="agent-zero")
 ← { success: true, expires_at: "2026-02-03T22:00:00Z" }
 
 # Agent renews claim for long-running work
-→ exo_task_renew(task_id="task-456", aspect="literature review", agent="agent-zero", ttl_minutes=120)
+→ lithos_task_renew(task_id="task-456", aspect="literature review", agent="agent-zero", ttl_minutes=120)
 ← { success: true, new_expires_at: "2026-02-04T00:00:00Z" }
 
 # Another agent checks what's being worked on
-→ exo_task_status(task_id="task-456")
+→ lithos_task_status(task_id="task-456")
 ← { tasks: [{ id: "task-456", status: "open", claims: [{ agent: "agent-zero", aspect: "literature review", expires_at: "..." }] }] }
 
 # Complete the task
-→ exo_task_complete(task_id="task-456", agent="agent-zero")
+→ lithos_task_complete(task_id="task-456", agent="agent-zero")
 ← { success: true }
 
 # List all known agents
-→ exo_agent_list()
+→ lithos_agent_list()
 ← { agents: [{ id: "agent-zero", name: "Agent Zero", last_seen_at: "..." }, { id: "openclaw", ... }] }
 
 # Check updated stats
-→ exo_stats()
+→ lithos_stats()
 ← { documents: 1, chunks: 3, agents: 2, active_tasks: 0, open_claims: 0, tags: 2 }
 ```
 
@@ -1243,11 +1243,11 @@ These are explicitly not part of the initial implementation but may be considere
 
 | Category | Tools |
 |----------|-------|
-| Knowledge | `exo_write`, `exo_read`, `exo_delete`, `exo_search`, `exo_semantic`, `exo_list` |
-| Graph | `exo_links`, `exo_tags` |
-| Agent | `exo_agent_register`, `exo_agent_info`, `exo_agent_list` |
-| Coordination | `exo_task_create`, `exo_task_claim`, `exo_task_renew`, `exo_task_release`, `exo_task_complete`, `exo_task_status`, `exo_finding_post`, `exo_finding_list` |
-| System | `exo_stats` |
+| Knowledge | `lithos_write`, `lithos_read`, `lithos_delete`, `lithos_search`, `lithos_semantic`, `lithos_list` |
+| Graph | `lithos_links`, `lithos_tags` |
+| Agent | `lithos_agent_register`, `lithos_agent_info`, `lithos_agent_list` |
+| Coordination | `lithos_task_create`, `lithos_task_claim`, `lithos_task_renew`, `lithos_task_release`, `lithos_task_complete`, `lithos_task_status`, `lithos_finding_post`, `lithos_finding_list` |
+| System | `lithos_stats` |
 
 **Total: 19 MCP tools**
 

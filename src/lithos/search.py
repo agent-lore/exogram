@@ -8,8 +8,8 @@ import chromadb
 import tantivy
 from sentence_transformers import SentenceTransformer
 
-from exogram.config import ExogramConfig, get_config
-from exogram.knowledge import KnowledgeDocument
+from lithos.config import LithosConfig, get_config
+from lithos.knowledge import KnowledgeDocument
 
 
 @dataclass
@@ -523,7 +523,7 @@ class ChromaIndex:
 class SearchEngine:
     """Combined search engine with full-text and semantic search."""
 
-    def __init__(self, config: ExogramConfig | None = None):
+    def __init__(self, config: LithosConfig | None = None):
         """Initialize search engine.
 
         Args:
@@ -534,7 +534,7 @@ class SearchEngine:
         self._chroma: ChromaIndex | None = None
 
     @property
-    def config(self) -> ExogramConfig:
+    def config(self) -> LithosConfig:
         """Get configuration."""
         return self._config or get_config()
 

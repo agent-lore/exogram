@@ -1,4 +1,4 @@
-# Exogram
+# Lithos
 
 **Shared memory for AI agents.**
 
@@ -6,7 +6,7 @@ A local, privacy-first knowledge base that enables heterogeneous AI agents to sh
 
 ## What It Is
 
-Exogram is an MCP server that provides a shared knowledge store for AI agents running on your local infrastructure. Knowledge is stored as human-readable Markdown files (compatible with Obsidian) while providing fast full-text and semantic search for agents.
+Lithos is an MCP server that provides a shared knowledge store for AI agents running on your local infrastructure. Knowledge is stored as human-readable Markdown files (compatible with Obsidian) while providing fast full-text and semantic search for agents.
 
 ## Who It's For
 
@@ -26,7 +26,7 @@ Exogram is an MCP server that provides a shared knowledge store for AI agents ru
 ## Quickstart
 
 ```bash
-claude mcp add --transport sse exogram http://localhost:8765/sse
+claude mcp add --transport sse lithos http://localhost:8765/sse
 ```
 
 ## Tech Stack

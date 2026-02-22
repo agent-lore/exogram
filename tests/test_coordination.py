@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from exogram.coordination import CoordinationService
+from lithos.coordination import CoordinationService
 
 
 class TestAgentRegistry:

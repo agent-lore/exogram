@@ -2,8 +2,8 @@
 
 import pytest
 
-from exogram.graph import KnowledgeGraph
-from exogram.knowledge import KnowledgeManager
+from lithos.graph import KnowledgeGraph
+from lithos.knowledge import KnowledgeManager
 
 
 class TestGraphBuilding:

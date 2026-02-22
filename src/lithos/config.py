@@ -1,4 +1,4 @@
-"""Configuration management for Exogram."""
+"""Configuration management for Lithos."""
 
 import os
 from pathlib import Path
@@ -74,11 +74,11 @@ class IndexConfig(BaseModel):
     watch_debounce_ms: int = 500
 
 
-class ExogramConfig(BaseSettings):
-    """Main Exogram configuration."""
+class LithosConfig(BaseSettings):
+    """Main Lithos configuration."""
 
     model_config = SettingsConfigDict(
-        env_prefix="EXOGRAM_",
+        env_prefix="LITHOS_",
         env_nested_delimiter="__",
         extra="ignore",
     )
@@ -90,7 +90,7 @@ class ExogramConfig(BaseSettings):
     index: IndexConfig = Field(default_factory=IndexConfig)
 
     @classmethod
-    def from_yaml(cls, path: Path) -> "ExogramConfig":
+    def from_yaml(cls, path: Path) -> "LithosConfig":
         """Load configuration from YAML file."""
         if not path.exists():
             return cls()
@@ -109,10 +109,10 @@ class ExogramConfig(BaseSettings):
 
 
 # Global config instance (set during startup)
-_config: ExogramConfig | None = None
+_config: LithosConfig | None = None
 
 
-def load_config(path: str | None = None) -> ExogramConfig:
+def load_config(path: str | None = None) -> LithosConfig:
     """Load configuration from file and/or environment.
 
     Args:
@@ -124,27 +124,27 @@ def load_config(path: str | None = None) -> ExogramConfig:
     # Start with defaults or load from file
     if path:
         config_path = Path(path)
-        config = ExogramConfig.from_yaml(config_path) if config_path.exists() else ExogramConfig()
+        config = LithosConfig.from_yaml(config_path) if config_path.exists() else LithosConfig()
     else:
-        config = ExogramConfig()
+        config = LithosConfig()
 
     # Apply environment variable overrides
-    env_data_dir = os.environ.get("EXOGRAM_DATA_DIR")
+    env_data_dir = os.environ.get("LITHOS_DATA_DIR")
     if env_data_dir:
         config.storage.data_dir = Path(env_data_dir)
 
-    env_port = os.environ.get("EXOGRAM_PORT")
+    env_port = os.environ.get("LITHOS_PORT")
     if env_port:
         config.server.port = int(env_port)
 
-    env_host = os.environ.get("EXOGRAM_HOST")
+    env_host = os.environ.get("LITHOS_HOST")
     if env_host:
         config.server.host = env_host
 
     return config
 
 
-def get_config() -> ExogramConfig:
+def get_config() -> LithosConfig:
     """Get the global configuration instance."""
     global _config
     if _config is None:
@@ -152,7 +152,7 @@ def get_config() -> ExogramConfig:
     return _config
 
 
-def set_config(config: ExogramConfig | None) -> None:
+def set_config(config: LithosConfig | None) -> None:
     """Set the global configuration instance."""
     global _config
     _config = config

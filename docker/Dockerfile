@@ -1,4 +1,4 @@
-# Exogram - Local shared knowledge base for AI agents
+# Lithos - Local shared knowledge base for AI agents
 # Multi-stage build for smaller image
 
 # Stage 1: Build dependencies
@@ -44,9 +44,9 @@ ENV PYTHONUNBUFFERED=1
 RUN mkdir -p /data/knowledge /data/index /data/chroma /data/graph
 
 # Default environment variables
-ENV EXOGRAM_DATA_DIR=/data
-ENV EXOGRAM_HOST=0.0.0.0
-ENV EXOGRAM_PORT=8765
+ENV LITHOS_DATA_DIR=/data
+ENV LITHOS_HOST=0.0.0.0
+ENV LITHOS_PORT=8765
 
 # Expose SSE port
 EXPOSE 8765
@@ -55,4 +55,4 @@ EXPOSE 8765
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3     CMD python -c "import socket; s=socket.socket(); s.connect(('localhost', 8765)); s.close()" || exit 1
 
 # Default command: run SSE server
-CMD ["python", "-m", "exogram.cli", "serve", "--transport", "sse", "--host", "0.0.0.0", "--port", "8765"]
+CMD ["python", "-m", "lithos.cli", "serve", "--transport", "sse", "--host", "0.0.0.0", "--port", "8765"]

@@ -1,19 +1,19 @@
-# Exogram Docker Compose configuration
+# Lithos Docker Compose configuration
 services:
-  exogram:
+  lithos:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: exogram
+    container_name: lithos
     restart: unless-stopped
     volumes:
-      - ${EXOGRAM_DATA_PATH:-./data}:/data
+      - ${LITHOS_DATA_PATH:-./data}:/data
     ports:
       - "8765:8765"
     environment:
-      - EXOGRAM_DATA_DIR=/data
-      - EXOGRAM_HOST=0.0.0.0
-      - EXOGRAM_PORT=8765
+      - LITHOS_DATA_DIR=/data
+      - LITHOS_HOST=0.0.0.0
+      - LITHOS_PORT=8765
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('localhost', 8765)); s.close()"]
       interval: 30s
