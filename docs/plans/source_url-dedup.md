@@ -30,6 +30,8 @@ Validation:
 - Accept only `http` and `https`
 - Treat empty/whitespace URL as invalid input
 
+**Normalize on write to disk.** When `create` or `update` stores a `source_url`, normalize it before writing to frontmatter. This ensures the YAML on disk, the in-memory map, and both search indices always hold the same canonical form. No read-time normalization needed; `lithos_read` returns exactly what's on disk. `_scan_existing` still normalizes on load to handle documents written before this feature existed or edited manually.
+
 Update `to_dict`, `from_dict`, `create`, `update`, and `_scan_existing` to round-trip and normalize `source_url`.
 
 ### 2. Manager-level dedup invariants (single source of truth)
@@ -42,11 +44,22 @@ Add:
 
 Maintain `_source_url_to_id` in `_scan_existing`, create, update, and delete.
 
+Sentinel for omit-vs-clear: Python cannot distinguish `source_url=None` (caller wants to clear) from an omitted keyword argument (caller wants to preserve). Use a module-level sentinel:
+
+```python
+_UNSET = object()
+```
+
+Then signature becomes `source_url: str | None | object = _UNSET`. At call sites:
+- `_UNSET` (default) → preserve existing value, no map change
+- `None` → clear existing value, remove from map
+- `str` → normalize and apply dedup check
+
 Behavior:
 - Create with `source_url`: normalize, check map, reject if mapped to another doc
-- Update with `source_url`: normalize, allow same-doc URL, reject if mapped to different doc
-- Update with omitted `source_url`: preserve existing value
-- Update with `source_url=None`: clear existing value
+- Update with `source_url` (str): normalize, allow same-doc URL, reject if mapped to different doc
+- Update with omitted `source_url` (`_UNSET`): preserve existing value
+- Update with `source_url=None`: clear existing value and remove from map
 
 ### 3. Duplicate handling and `lithos_write` contract
 
