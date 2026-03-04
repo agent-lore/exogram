@@ -2,138 +2,131 @@
 
 Combines: "URL deduplication field" + "source_url as indexed field"
 
-KnowledgeMetadata already has a `source` field, but it holds a **task ID** (via `source_task` in `lithos_write`), it's not indexed, and nothing checks for collisions. This work makes URL provenance a first-class citizen by adding a **new** `source_url` field alongside the existing `source`.
+KnowledgeMetadata already has a `source` field, but it holds a **task ID** (via `source_task` in `lithos_write`), it is not indexed for URL provenance, and no collision checks exist. This work adds a new `source_url` field and enforces URL uniqueness.
 
 ## Problem
 
-Without dedup, every time a daily research task runs it can write duplicate notes on the same URLs. After a week that's potentially 50+ near-identical documents. Search results get polluted, semantic search has to wade through redundant content, and agents lose confidence in what they find. It compounds silently.
+Without dedup, recurring research tasks can repeatedly write near-identical notes from the same URL. Search gets noisy, semantic retrieval gets redundant chunks, and cache lookup cannot reliably find one authoritative note.
 
-The research cache plan (already designed) depends on `lithos_cache_lookup` finding the one authoritative note for a URL. If there are four duplicate notes with different IDs and slightly different content, the cache is unreliable. Dedup is load-bearing infrastructure for the cache.
+The research cache plan depends on stable URL-to-document mapping. Dedup is foundational for that.
 
 ## Design
 
 ### 1. New `source_url` field on KnowledgeMetadata
 
-Add `source_url: str | None = None` to `KnowledgeMetadata` alongside the existing `source` field (which continues to hold task IDs).
+Add `source_url: str | None = None` to `KnowledgeMetadata` alongside existing `source` (which remains task-ID oriented).
 
-**URL normalization** — before storing or comparing, normalize URLs:
+Add `normalize_url(raw: str) -> str` in `knowledge.py`:
 - Lowercase scheme and host (`HTTPS://Example.COM` -> `https://example.com`)
-- Strip trailing slash on path (`https://example.com/page/` -> `https://example.com/page`)
-- Remove default ports (`:443` for https, `:80` for http)
 - Remove fragment (`#section`)
-- Sort query parameters alphabetically
-- Strip common tracking params (`utm_*`, `ref`, `fbclid`)
+- Remove default ports (`:443` for https, `:80` for http)
+- Strip trailing slash when path is not root (`/page/` -> `/page`)
+- Sort query params alphabetically
+- Remove tracking params (`utm_*`, `fbclid`)
 
-Add a `normalize_url(raw: str) -> str` helper in `knowledge.py`. Keep it simple — use `urllib.parse` and a small blocklist of tracking params.
+`ref` is **not** removed by default (it can be semantically meaningful on some sites).
 
-Update `to_dict`, `from_dict`, `create`, and `_scan_existing` to handle the new field.
+Validation:
+- Accept only `http` and `https`
+- Treat empty/whitespace URL as invalid input
 
-### 2. In-memory index for O(1) dedup lookups
+Update `to_dict`, `from_dict`, `create`, `update`, and `_scan_existing` to round-trip and normalize `source_url`.
 
-Add `_source_url_to_id: dict[str, str]` to `KnowledgeManager`, populated during `_scan_existing` alongside the existing `_id_to_path` and `_slug_to_id` maps. This avoids hitting Tantivy on every write.
+### 2. Manager-level dedup invariants (single source of truth)
 
-Maintain the map on create, update, and delete:
-- **create**: add entry after successful write
-- **update**: if `source_url` changed, remove old mapping, add new one; skip collision check against the document's own ID
-- **delete**: remove entry
+Dedup enforcement must live in `KnowledgeManager`, not only `server.py`, so all write paths follow the same invariant.
 
-### 3. Index source_url in Tantivy
+Add:
+- `_source_url_to_id: dict[str, str]`
+- `asyncio.Lock` (e.g., `_write_lock`) to protect check+write critical sections
 
-Add `source_url` as a keyword field (raw tokenizer, stored) in `TantivyIndex._build_schema()`. This enables exact-match queries like `source_url:https://example.com/page`.
+Maintain `_source_url_to_id` in `_scan_existing`, create, update, and delete.
 
-**Schema migration**: adding a field to the Tantivy schema makes existing indices incompatible. The existing `open_or_create` recovery path (delete + recreate on corruption) handles this, but `_rebuild_indices` will run on next startup. Note this in release/upgrade docs.
+Behavior:
+- Create with `source_url`: normalize, check map, reject if mapped to another doc
+- Update with `source_url`: normalize, allow same-doc URL, reject if mapped to different doc
+- Update with omitted `source_url`: preserve existing value
+- Update with `source_url=None`: clear existing value
 
-Include `source_url` in `TantivyIndex.add_document()`:
-```python
-writer.add_document(
-    tantivy.Document(
-        id=doc.id,
-        title=doc.title,
-        content=doc.full_content,
-        path=str(doc.path),
-        author=doc.metadata.author,
-        tags=" ".join(doc.metadata.tags),
-        source_url=doc.metadata.source_url or "",
-    )
-)
-```
+### 3. Duplicate handling and `lithos_write` contract
 
-### 4. Store source_url in ChromaDB metadata
-
-Add `source_url` to the per-chunk metadata dict in `ChromaIndex.add_document()` so semantic search results can also return provenance:
-```python
-metadatas = [
-    {
-        "doc_id": doc.id,
-        ...
-        "source_url": doc.metadata.source_url or "",
-    }
-    for i in range(len(chunks))
-]
-```
-
-### 5. Dedup check in lithos_write
-
-Add `source_url: str | None = None` parameter to `lithos_write`.
-
-On create (no `id` provided), if `source_url` is provided:
-1. Normalize the URL
-2. Look up `_source_url_to_id` for an existing document
-3. If found, **do not write**. Return a response with a `duplicate_of` field:
+Since breaking contract is acceptable, make response shape explicit and status-based:
 
 ```python
+{"status": "created", "id": "...", "path": "..."}
+{"status": "updated", "id": "...", "path": "..."}
 {
     "status": "duplicate",
-    "duplicate_of": {
-        "id": existing_id,
-        "title": existing_title,
-        "source_url": normalized_url,
-    },
-    "message": "A document with this source_url already exists. Use the existing document's id to update it."
+    "duplicate_of": {"id": "...", "title": "...", "source_url": "..."},
+    "message": "A document with this source_url already exists."
 }
 ```
 
-On update (`id` provided), if `source_url` is provided:
-1. Normalize the URL
-2. Check `_source_url_to_id` — only flag collision if the mapping points to a **different** document ID
-3. If collision with another doc, return `duplicate_of` as above
-4. If no collision, proceed with update and maintain the map
+`lithos_write` continues to pass `source_task` to `source` and now also accepts `source_url`.
 
-Default behavior is **reject-with-info** (return the duplicate info, don't write). This is safer than silently writing duplicates. Agents get the existing doc ID and can update it themselves.
+### 4. In-memory index initialization and duplicate audit
 
-### 6. Return source_url in search results
+`_scan_existing` should:
+- Normalize any discovered `source_url`
+- Populate `_source_url_to_id`
+- Record URL collisions found in existing data and log them deterministically
 
-Add `source_url: str = ""` to both result dataclasses:
-- `SearchResult` in search.py
-- `SemanticResult` in search.py
+Startup should not fail on existing collisions, but they must be visible in logs. New writes must enforce dedup strictly.
 
-Populate from Tantivy doc / ChromaDB metadata in the respective `search()` methods.
+### 5. Index `source_url` in Tantivy
 
-Include `source_url` in all response dicts in server.py:
+Add `source_url` as a raw/stored field in `TantivyIndex._build_schema()`.
+
+Add `source_url` in `add_document()`.
+
+Querying guidance:
+- Do not rely on naive unquoted query strings such as `source_url:https://...`
+- Use quoted/escaped terms or dedicated term-query helper for exact URL match
+
+### 6. Schema migration and rebuild behavior
+
+Adding Tantivy field changes schema. Index recreation alone is not enough; a full content reindex must run immediately after detecting schema incompatibility.
+
+Plan:
+- Detect schema-open failure in `open_or_create()`
+- Recreate Tantivy index
+- Trigger full `_rebuild_indices` (or equivalent) on startup so full-text index is repopulated in same boot
+
+Document this in upgrade notes.
+
+### 7. Store `source_url` in ChromaDB metadata
+
+Add `source_url` to chunk metadata in `ChromaIndex.add_document()` so semantic results include provenance without fetching docs separately.
+
+### 8. Return `source_url` in read/search/list responses
+
+Add `source_url: str = ""` to:
+- `SearchResult`
+- `SemanticResult`
+
+Populate from Tantivy/Chroma metadata.
+
+Include `source_url` in:
+- `lithos_read` metadata
 - `lithos_search` results
 - `lithos_semantic` results
-- `lithos_read` response metadata
 - `lithos_list` items
-
-### 7. Pass source_url through KnowledgeManager.create
-
-Add `source_url: str | None = None` parameter to `KnowledgeManager.create()`. Normalize before storing. The dedup check itself lives in `lithos_write` (server layer), not in `KnowledgeManager`, so the manager stays a simple CRUD layer.
 
 ## Files
 
 | File | Changes |
 |------|---------|
-| `knowledge.py` | Add `source_url` to `KnowledgeMetadata` (field, `to_dict`, `from_dict`). Add `normalize_url()` helper. Add `_source_url_to_id` map to `KnowledgeManager`. Update `_scan_existing`, `create`, `update`, `delete` to maintain the map. Add `source_url` param to `create`. |
-| `search.py` | Add `source_url` keyword field to Tantivy schema. Include in `add_document` for both Tantivy and ChromaDB. Add `source_url` field to `SearchResult` and `SemanticResult`. Populate in both `search()` methods. |
-| `server.py` | Add `source_url` param to `lithos_write`. Dedup check before create. Include `source_url` in responses for `lithos_write`, `lithos_read`, `lithos_search`, `lithos_semantic`, `lithos_list`. |
-| `tests/` | Test URL normalization. Test dedup on create (duplicate detected, no-collision, update-self). Test source_url appears in search results. Test schema rebuild path. |
+| `knowledge.py` | Add `source_url` to `KnowledgeMetadata`; add `normalize_url`; add `_source_url_to_id`; add write lock; enforce dedup in manager create/update; update `_scan_existing` with duplicate audit logging; keep indices in sync on delete. |
+| `search.py` | Add Tantivy `source_url` field; include in indexed docs; include in Chroma metadata; add `source_url` on `SearchResult`/`SemanticResult`; populate in search methods. |
+| `server.py` | Add `source_url` param to `lithos_write`; use status-based return contract (`created`/`updated`/`duplicate`); include `source_url` in read/search/semantic/list responses. |
+| `tests/` | Add normalization tests; invalid URL tests; dedup tests for create/update/self-update/clear; concurrent create collision test; existing duplicate-at-startup audit test; search result provenance test; schema migration + immediate rebuild test. |
 
 ## Scope
 
-Medium — touches three source files plus tests. Logic is straightforward but the surface area is wide (every read/search/list response). The Tantivy schema change forces a reindex on upgrade, which should be documented.
+Medium+ — still focused, but includes API contract change, migration behavior, and concurrency safeguards. Surface area spans write path, metadata, two search backends, startup behavior, and tool responses.
 
 ## Out of scope (future)
 
-- Configurable `dedup_mode` (warn/reject/upsert) in `LithosConfig` — start with reject-with-info, add config if agents need different behavior
-- Bulk dedup check for the bulk-write feature (batch the `_source_url_to_id` lookups)
-- Retroactive dedup scan for existing documents that share URLs
+- Configurable `dedup_mode` (`reject`, `warn`, `upsert`) in `LithosConfig`
+- Bulk dedup API for batch writes
+- Auto-remediation for legacy duplicate URLs (beyond startup audit logging)
