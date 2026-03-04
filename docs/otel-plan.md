@@ -6,10 +6,10 @@
 
 **Key principles:**
 
-- OTEL is **opt-in** -- `LITHOS__TELEMETRY__ENABLED=true` enables it, otherwise zero overhead
+- OTEL is **opt-in** -- `LITHOS_TELEMETRY__ENABLED=true` enables it, otherwise minimal overhead
 - OTEL is **additive** -- `docker logs lithos` works exactly as before
 - OTEL packages are **optional** -- `uv sync --extra otel` installs them; Lithos runs fine without
-- **Console fallback** -- set `LITHOS__TELEMETRY__CONSOLE_FALLBACK=true` without an OTLP endpoint and spans print to stdout (useful for dev without the full stack)
+- **Console fallback** -- set `LITHOS_TELEMETRY__CONSOLE_FALLBACK=true` without an OTLP endpoint and spans print to stdout (useful for dev without the full stack)
 
 ---
 
@@ -76,15 +76,17 @@ if env_otlp_endpoint:
     config.telemetry.endpoint = env_otlp_endpoint
 ```
 
-This allows both the pydantic-native `LITHOS__TELEMETRY__ENABLED=true` and the docker-compose-friendly `LITHOS_OTEL_ENABLED=true` patterns.
+This allows both the pydantic-native `LITHOS_TELEMETRY__ENABLED=true` and the docker-compose-friendly `LITHOS_OTEL_ENABLED=true` patterns.
+
+Endpoint contract: `telemetry.endpoint` should be a base OTLP HTTP collector URL (example: `http://otel-collector:4318`). The code also honors `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` / `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` when signal-specific endpoints are needed.
 
 ### Step 3: Create src/lithos/telemetry.py
 
 This is the core module. It handles three scenarios:
 
 1. OTEL packages installed, telemetry enabled -- full instrumentation
-2. OTEL packages installed, telemetry disabled -- no-ops, zero overhead
-3. OTEL packages **not installed** -- no-ops, zero overhead, no import errors
+2. OTEL packages installed, telemetry disabled -- no-ops, minimal overhead
+3. OTEL packages **not installed** -- no-ops, minimal overhead, no import errors
 
 ```python
 """OpenTelemetry instrumentation for Lithos.
@@ -99,6 +101,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import os
 from typing import TYPE_CHECKING, Any, Callable, TypeVar
 
 if TYPE_CHECKING:
@@ -112,6 +115,7 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 try:
     from opentelemetry import metrics, trace
+    from opentelemetry.metrics import Observation
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
     from opentelemetry.sdk.resources import Resource
@@ -189,6 +193,9 @@ class _NoOpMeter:
     def create_up_down_counter(self, name: str, **kwargs: Any) -> _NoOpCounter:
         return _NoOpCounter()
 
+    def create_observable_gauge(self, name: str, **kwargs: Any) -> None:
+        return None
+
 
 # --- Lifecycle ---
 
@@ -229,16 +236,23 @@ def setup_telemetry(config: LithosConfig, *, _test_span_exporter: Any = None) ->
     })
 
     endpoint = config.telemetry.endpoint
+    # Prefer signal-specific OTEL endpoints if provided, otherwise derive from base.
+    traces_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+    metrics_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
+    if not traces_endpoint and endpoint:
+        traces_endpoint = _signal_endpoint(endpoint, "traces")
+    if not metrics_endpoint and endpoint:
+        metrics_endpoint = _signal_endpoint(endpoint, "metrics")
 
     # --- Traces ---
     _tracer_provider = TracerProvider(resource=resource)
 
     if _test_span_exporter is not None:
         _tracer_provider.add_span_processor(SimpleSpanProcessor(_test_span_exporter))
-    elif endpoint:
+    elif traces_endpoint:
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
-        span_exporter = OTLPSpanExporter(endpoint=f"{endpoint}/v1/traces")
+        span_exporter = OTLPSpanExporter(endpoint=traces_endpoint)
         _tracer_provider.add_span_processor(BatchSpanProcessor(span_exporter))
     elif config.telemetry.console_fallback:
         _tracer_provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
@@ -248,11 +262,11 @@ def setup_telemetry(config: LithosConfig, *, _test_span_exporter: Any = None) ->
     # --- Metrics ---
     metric_reader = None
 
-    if endpoint:
+    if metrics_endpoint:
         from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 
         metric_reader = PeriodicExportingMetricReader(
-            OTLPMetricExporter(endpoint=f"{endpoint}/v1/metrics"),
+            OTLPMetricExporter(endpoint=metrics_endpoint),
             export_interval_millis=config.telemetry.export_interval_ms,
         )
     elif config.telemetry.console_fallback:
@@ -305,6 +319,18 @@ def _get_package_version() -> str:
         return "unknown"
 
 
+def _signal_endpoint(base: str, signal: str) -> str:
+    """Build OTLP HTTP signal endpoint from base collector URL."""
+    base = base.rstrip("/")
+    if base.endswith(f"/v1/{signal}"):
+        return base
+    if base.endswith("/v1/traces") and signal == "metrics":
+        return base.replace("/v1/traces", "/v1/metrics")
+    if base.endswith("/v1/metrics") and signal == "traces":
+        return base.replace("/v1/metrics", "/v1/traces")
+    return f"{base}/v1/{signal}"
+
+
 # --- Accessors ---
 
 
@@ -332,7 +358,7 @@ def traced(
     """Decorator that wraps a function in an OTEL span.
 
     Works for both sync and async functions. When OTEL is disabled,
-    the decorator is a transparent pass-through (zero overhead).
+    the decorator is a transparent pass-through (minimal overhead).
 
     Args:
         span_name: Span name. Defaults to "lithos.{module}.{function}".
@@ -402,7 +428,6 @@ class _LithosMetrics:
         self._search_ops: Any = None
         self._search_duration: Any = None
         self._coordination_ops: Any = None
-        self._active_claims: Any = None
 
     @property
     def knowledge_ops(self) -> Any:
@@ -440,14 +465,14 @@ class _LithosMetrics:
             )
         return self._coordination_ops
 
-    @property
-    def active_claims(self) -> Any:
-        if self._active_claims is None:
-            self._active_claims = get_meter().create_up_down_counter(
-                "lithos.coordination.active_claims",
-                description="Currently active task claims",
-            )
-        return self._active_claims
+def register_active_claims_observer(get_active_claim_count: Callable[[], int]) -> None:
+    """Register an observable gauge backed by real DB state."""
+    meter = get_meter()
+    meter.create_observable_gauge(
+        "lithos.coordination.active_claims",
+        callbacks=[lambda _options: [Observation(int(get_active_claim_count()))]],
+        description="Currently active non-expired task claims",
+    )
 
 
 lithos_metrics = _LithosMetrics()
@@ -544,21 +569,43 @@ Instead of only instrumenting at the server.py tool level, add `@traced` at mult
 **search.py** -- where real search latency lives:
 
 ```python
+import time
+
 from lithos.telemetry import traced, lithos_metrics
 
 class SearchEngine:
 
     @traced("lithos.search.fulltext")
     def full_text_search(self, query, limit=10, tags=None, author=None, path_prefix=None):
-        # ... existing code ...
-        lithos_metrics.search_ops.add(1, {"type": "fulltext"})
-        return results
+        start = time.perf_counter()
+        success = False
+        try:
+            # ... existing code ...
+            lithos_metrics.search_ops.add(1, {"type": "fulltext"})
+            success = True
+            return results
+        finally:
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            lithos_metrics.search_duration.record(
+                elapsed_ms,
+                {"type": "fulltext", "success": success},
+            )
 
     @traced("lithos.search.semantic")
     def semantic_search(self, query, limit=10, threshold=None, tags=None):
-        # ... existing code ...
-        lithos_metrics.search_ops.add(1, {"type": "semantic"})
-        return results
+        start = time.perf_counter()
+        success = False
+        try:
+            # ... existing code ...
+            lithos_metrics.search_ops.add(1, {"type": "semantic"})
+            success = True
+            return results
+        finally:
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            lithos_metrics.search_duration.record(
+                elapsed_ms,
+                {"type": "semantic", "success": success},
+            )
 
     @traced("lithos.search.index_document")
     def index_document(self, doc):
@@ -585,18 +632,18 @@ class CoordinationService:
     async def claim_task(self, task_id, aspect, agent, ttl_minutes=60):
         # ... existing code ...
         lithos_metrics.coordination_ops.add(1, {"op": "claim"})
-        lithos_metrics.active_claims.add(1)
 
     @traced("lithos.coordination.release_claim")
     async def release_claim(self, task_id, aspect, agent):
         # ... existing code ...
-        lithos_metrics.active_claims.add(-1)
 
     @traced("lithos.coordination.complete_task")
     async def complete_task(self, task_id, agent):
         # ... existing code ...
         lithos_metrics.coordination_ops.add(1, {"op": "complete"})
 ```
+
+For `active_claims`, do **not** increment/decrement in request paths (it drifts on expiry, renewals, and failures). Use the observable gauge registered in `setup_telemetry()` with a callback that reads current active claims from SQLite.
 
 **knowledge.py** -- file I/O:
 
@@ -631,6 +678,8 @@ class KnowledgeManager:
 For MCP tool functions (closures inside `_register_tools()`), use `get_tracer()` directly to add tool-level attributes. The `@traced` calls on the underlying modules automatically appear as child spans:
 
 ```python
+import hashlib
+
 from lithos.telemetry import get_tracer
 
 @self.mcp.tool()
@@ -638,7 +687,8 @@ async def lithos_search(query: str, limit: int = 10, ...) -> dict:
     tracer = get_tracer()
     with tracer.start_as_current_span("lithos.tool.search") as span:
         span.set_attribute("lithos.tool", "lithos_search")
-        span.set_attribute("lithos.query", query)
+        span.set_attribute("lithos.query.length", len(query))
+        span.set_attribute("lithos.query.sha256", hashlib.sha256(query.encode()).hexdigest()[:16])
         span.set_attribute("lithos.limit", limit)
         results = self.search.full_text_search(...)  # produces child span
         span.set_attribute("lithos.result_count", len(results))
@@ -658,6 +708,8 @@ async def lithos_write(title, content, agent, ...) -> dict:
         span.set_attribute("lithos.doc_id", doc.id)
         return {"id": doc.id, "path": str(doc.path)}
 ```
+
+Avoid putting raw query text, document content, prompts, or completions into span attributes/events by default.
 
 This produces trace trees like:
 
@@ -687,9 +739,9 @@ All metrics are accessed via the lazy `lithos_metrics` singleton (see telemetry.
 | ------ | ---- | ----------- |
 | `lithos.knowledge.operations` | Counter | Knowledge CRUD ops, attr: `op` |
 | `lithos.search.operations` | Counter | Search ops, attr: `type` (fulltext/semantic) |
-| `lithos.search.duration_ms` | Histogram | Search latency |
+| `lithos.search.duration_ms` | Histogram | Search latency (attrs: `type`, `success`) |
 | `lithos.coordination.operations` | Counter | Coordination ops, attr: `op` |
-| `lithos.coordination.active_claims` | UpDownCounter | Currently active claims |
+| `lithos.coordination.active_claims` | ObservableGauge | Current non-expired claims (DB-derived) |
 
 ---
 
@@ -727,6 +779,15 @@ For the Opik LLM analysis UI, see the lithos-observability repo (`docker-compose
 import asyncio
 
 import pytest
+
+
+def _has_otel_packages() -> bool:
+    try:
+        import opentelemetry  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
 
 
 class TestTelemetryDisabled:
@@ -863,15 +924,18 @@ class TestTelemetryEnabled:
         shutdown_telemetry()
         assert len(exporter.get_finished_spans()) == 1
         _reset_for_testing()
+```
 
+Also add one CLI lifecycle integration test:
 
-def _has_otel_packages() -> bool:
-    try:
-        import opentelemetry  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
+```python
+def test_serve_shutdown_calls_telemetry_shutdown(monkeypatch, test_config):
+    calls = {"setup": 0, "shutdown": 0}
+    monkeypatch.setattr("lithos.telemetry.setup_telemetry", lambda cfg: calls.__setitem__("setup", 1))
+    monkeypatch.setattr("lithos.telemetry.shutdown_telemetry", lambda: calls.__setitem__("shutdown", 1))
+    # invoke serve() in a controlled test harness and assert shutdown always executes
+    assert calls["setup"] == 1
+    assert calls["shutdown"] == 1
 ```
 
 ---
@@ -898,7 +962,7 @@ Total: ~4-5 hours
 ## Key Points
 
 - **docker logs keeps working** -- OTEL is additive, stdout is unchanged
-- **OTEL is opt-in** -- disabled by default, zero overhead for contributors
+- **OTEL is opt-in** -- disabled by default, minimal overhead for contributors
 - **Console fallback** -- useful for dev without the full OTEL stack
 - **Graceful degradation** -- lithos runs fine if OTEL packages are not installed
 - **One collector, many services** -- future services just point at `otel-collector:4318`
