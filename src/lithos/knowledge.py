@@ -27,10 +27,21 @@ class WikiLink:
         return self.display or self.target
 
 
-_KNOWN_METADATA_KEYS = frozenset({
-    "id", "title", "author", "created_at", "updated_at",
-    "tags", "aliases", "confidence", "contributors", "source", "supersedes",
-})
+_KNOWN_METADATA_KEYS = frozenset(
+    {
+        "id",
+        "title",
+        "author",
+        "created_at",
+        "updated_at",
+        "tags",
+        "aliases",
+        "confidence",
+        "contributors",
+        "source",
+        "supersedes",
+    }
+)
 
 
 @dataclass

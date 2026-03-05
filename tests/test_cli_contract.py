@@ -130,7 +130,15 @@ class TestCLIContracts:
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            ["--data-dir", str(temp_dir), "search", "no-such-semantic-needle", "--semantic", "--limit", "2"],
+            [
+                "--data-dir",
+                str(temp_dir),
+                "search",
+                "no-such-semantic-needle",
+                "--semantic",
+                "--limit",
+                "2",
+            ],
         )
         assert result.exit_code == 0, result.output
         assert "Semantic search: no-such-semantic-needle" in result.output

@@ -507,14 +507,10 @@ def inspect_doc(ctx: click.Context, identifier: str, content: bool) -> None:
         click.echo(f"  author:  {doc.metadata.author or '—'}")
         click.echo(f"  tags:    {', '.join(doc.metadata.tags) if doc.metadata.tags else '—'}")
         created = (
-            doc.metadata.created_at.strftime("%Y-%m-%d %H:%M")
-            if doc.metadata.created_at
-            else "—"
+            doc.metadata.created_at.strftime("%Y-%m-%d %H:%M") if doc.metadata.created_at else "—"
         )
         updated = (
-            doc.metadata.updated_at.strftime("%Y-%m-%d %H:%M")
-            if doc.metadata.updated_at
-            else "—"
+            doc.metadata.updated_at.strftime("%Y-%m-%d %H:%M") if doc.metadata.updated_at else "—"
         )
         click.echo(f"  created: {created}")
         click.echo(f"  updated: {updated}")

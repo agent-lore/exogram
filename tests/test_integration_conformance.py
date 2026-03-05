@@ -55,9 +55,7 @@ async def _wait_for_semantic_hit(
         if any(item["id"] == doc_id for item in payload["results"]):
             return
         await asyncio.sleep(0.05)
-    raise AssertionError(
-        f"Document {doc_id} not found in semantic results for query={query!r}"
-    )
+    raise AssertionError(f"Document {doc_id} not found in semantic results for query={query!r}")
 
 
 async def _wait_for_full_text_miss(server: LithosServer, query: str, doc_id: str) -> None:
@@ -67,9 +65,7 @@ async def _wait_for_full_text_miss(server: LithosServer, query: str, doc_id: str
         if not any(item["id"] == doc_id for item in payload["results"]):
             return
         await asyncio.sleep(0.05)
-    raise AssertionError(
-        f"Document {doc_id} still present in search results for query={query!r}"
-    )
+    raise AssertionError(f"Document {doc_id} still present in search results for query={query!r}")
 
 
 async def _wait_for_semantic_miss(
@@ -83,9 +79,7 @@ async def _wait_for_semantic_miss(
         if not any(item["id"] == doc_id for item in payload["results"]):
             return
         await asyncio.sleep(0.05)
-    raise AssertionError(
-        f"Document {doc_id} still present in semantic results for query={query!r}"
-    )
+    raise AssertionError(f"Document {doc_id} still present in semantic results for query={query!r}")
 
 
 class TestMCPToolContracts:
@@ -350,9 +344,7 @@ class TestRestartPersistence:
         # broken-yaml.md has invalid YAML and will be skipped by _rebuild_indices.
         # binary-file.md is not valid text and will fail parsing.
         knowledge_dir = test_config.storage.knowledge_path
-        (knowledge_dir / "broken-yaml.md").write_text(
-            "---\n: broken yaml\n---\nSome content\n"
-        )
+        (knowledge_dir / "broken-yaml.md").write_text("---\n: broken yaml\n---\nSome content\n")
         (knowledge_dir / "binary-file.md").write_bytes(b"\x00\x01\x02\xff\xfe")
 
         # Delete graph cache to force _rebuild_indices on next server init.
@@ -411,7 +403,9 @@ class TestFileWatcherRace:
         handler._schedule_update(file_path, deleted=True)
 
         for _ in range(30):
-            search_payload = await _call_tool(server, "lithos_search", {"query": "Watcher Race Doc"})
+            search_payload = await _call_tool(
+                server, "lithos_search", {"query": "Watcher Race Doc"}
+            )
             in_search = any(item["id"] == doc.id for item in search_payload["results"])
             in_graph = server.graph.has_node(doc.id)
             try:
@@ -777,9 +771,7 @@ class TestAgentAndCoordinationMCPTools:
         assert info["first_seen_at"] is not None
         assert info["last_seen_at"] is not None
 
-        listing = await _call_tool(
-            server, "lithos_agent_list", {"type": "integration-test"}
-        )
+        listing = await _call_tool(server, "lithos_agent_list", {"type": "integration-test"})
         assert any(agent["id"] == "agent-roundtrip" for agent in listing["agents"])
 
     @pytest.mark.asyncio
@@ -954,9 +946,7 @@ class TestAgentAndCoordinationMCPTools:
         assert stats_after["open_claims"] >= stats_before["open_claims"] + 1
 
     @pytest.mark.asyncio
-    async def test_integration_mcp_invalid_datetime_inputs_fail_cleanly(
-        self, server: LithosServer
-    ):
+    async def test_integration_mcp_invalid_datetime_inputs_fail_cleanly(self, server: LithosServer):
         task = await _call_tool(
             server,
             "lithos_task_create",
