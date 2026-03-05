@@ -1,5 +1,7 @@
 # Bulk Write API v3 (Durable Ingestion + Async Projection)
 
+Contract note: item-level request/response semantics in this plan are governed by `unified-write-contract.md`. System-level rollout and compatibility guardrails are governed by `final-architecture-guardrails.md`.
+
 ## Goal
 
 Support high-throughput, retry-safe batch writes without sacrificing data integrity.
@@ -41,6 +43,8 @@ lithos_write_batch(
 `CreateItem`:
 - `title`, `content`, `agent`
 - optional: `tags`, `confidence`, `path`, `source_url`, `source_task`, `derived_from_ids`
+- optional freshness: `ttl_hours`, `expires_at`
+- optional LCMA metadata: `note_type`, `namespace`, `access_scope`, `entities`, `status`, `schema_version`
 - optional: `idempotency_key` (per-item override)
 
 `UpdateItem`:
@@ -48,6 +52,29 @@ lithos_write_batch(
 - optional mutable fields as above
 - optional: `if_match_updated_at` or `if_match_hash` (optimistic concurrency)
 - optional: `idempotency_key`
+
+### Shared Write Contract (single + batch)
+
+Batch items use the same canonical write contract as `lithos_write`:
+
+- same field set and validation rules
+- same manager-level invariants (source URL dedup, provenance normalization, freshness parsing)
+- same outcome semantics
+
+Per-item write outcomes in `lithos_batch_status.items[*].result_json` use the status envelope:
+
+```python
+{"status": "created", "id": "...", "path": "...", "warnings": []}
+{"status": "updated", "id": "...", "path": "...", "warnings": []}
+{
+  "status": "duplicate",
+  "duplicate_of": {"id": "...", "title": "...", "source_url": "..."},
+  "message": "A document with this source_url already exists.",
+  "warnings": []
+}
+```
+
+`warnings` covers non-fatal issues such as unresolved `derived_from_ids`.
 
 ## 2) `lithos_batch_status`
 
@@ -177,16 +204,25 @@ Behavior:
 
 ## Observability
 
-Required metrics:
+Batch observability is implemented via the OTEL foundation in `otel-plan.md` (`telemetry.py`, `traced`, and `lithos_metrics`), not a parallel instrumentation stack.
 
-- `batch_ingest_latency_ms`
-- `batch_queue_depth`
-- `batch_apply_latency_ms`
-- `batch_projection_latency_ms`
-- `batch_projection_lag_ms`
-- `batch_items_failed_total{code=...}`
-- `batch_retries_total`
-- `batch_dead_letter_total`
+Required OTEL metrics:
+
+- `lithos.batch.ingest_latency_ms`
+- `lithos.batch.queue_depth`
+- `lithos.batch.apply_latency_ms`
+- `lithos.batch.projection_latency_ms`
+- `lithos.batch.projection_lag_ms`
+- `lithos.batch.items_failed_total{code=...}`
+- `lithos.batch.retries_total`
+- `lithos.batch.dead_letter_total`
+
+Required traces:
+
+- `lithos.batch.ingest`
+- `lithos.batch.apply`
+- `lithos.batch.project`
+- `lithos.batch.reconcile`
 
 Structured logs:
 - include `batch_id`, item index, status transitions, and error code.
@@ -202,7 +238,7 @@ Tables (illustrative):
 ## Migration Strategy
 
 1. Implement journal + status tool behind feature flag.
-2. Keep existing synchronous `lithos_write` unchanged.
+2. Keep existing synchronous `lithos_write` available, but align it and batch on the same status-based response envelope and shared validation/invariant path.
 3. Introduce `lithos_write_batch` v3 as opt-in.
 4. After soak, make v3 default batch path.
 

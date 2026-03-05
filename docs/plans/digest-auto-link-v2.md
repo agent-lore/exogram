@@ -1,5 +1,7 @@
 # Digest Auto-Linking v2 (Provenance-First)
 
+Contract note: `lithos_write` request/response semantics in this plan are governed by `unified-write-contract.md`. System-level rollout and compatibility guardrails are governed by `final-architecture-guardrails.md`.
+
 ## Goal
 
 Allow agents writing digest/synthesis notes to declare which notes they are derived from, without requiring manual `[[wiki-links]]` in content.

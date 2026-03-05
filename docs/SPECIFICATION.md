@@ -26,6 +26,12 @@ Status: Aligned with Implementation
 5. **Distributed deployment**: Single-node deployment only
 6. **Contradictory knowledge resolution**: Agents handle conflicts themselves using confidence scores
 
+### 1.3 Compatibility Policy (Pre-1.0)
+
+1. **MCP/API evolution is allowed**: Tool signatures and response envelopes may change to improve coherence.
+2. **On-disk compatibility is required**: Existing Markdown/frontmatter knowledge must remain readable and valid.
+3. **Migration safety over API stability**: When tradeoffs occur, preserve the knowledge corpus first.
+
 ---
 
 ## 2. Architecture
@@ -240,6 +246,11 @@ def ensure_agent_known(agent_id: str):
 
 ### 5.1 Knowledge Operations
 
+Normative contract references for the write path:
+
+- `docs/plans/unified-write-contract.md`
+- `docs/plans/final-architecture-guardrails.md`
+
 #### `lithos_write`
 Create or update a knowledge file.
 
@@ -254,10 +265,28 @@ Create or update a knowledge file.
 | `path` | string | No | Subdirectory path (e.g., "procedures") |
 | `id` | string | No | UUID to update existing; omit to create new |
 | `source_task` | string | No | Task ID or provenance note (stored as `source` in frontmatter) |
+| `source_url` | string | No | Canonical URL provenance (http/https), dedup key after normalization |
+| `derived_from_ids` | string[] | No | Canonical declared lineage (UUIDs) |
+| `ttl_hours` | float | No | Relative freshness window; converted to `expires_at` |
+| `expires_at` | string | No | Absolute ISO datetime freshness deadline |
+| `note_type` | string | No | LCMA note type (`observation`, `summary`, `concept`, etc.) |
+| `namespace` | string | No | LCMA namespace for retrieval scope |
+| `access_scope` | string | No | LCMA access scope (`agent_private`, `task`, `project`, `shared`, `user_private`) |
+| `entities` | string[] | No | LCMA entity annotations |
+| `status` | string | No | LCMA status (`active`, `archived`, `quarantined`) |
+| `schema_version` | int | No | Optional explicit schema version |
 
-**Returns:** `{ id: string, path: string }`
+**Returns (status envelope):**
+
+`{ status: "created", id: string, path: string, warnings: string[] }`
+
+`{ status: "updated", id: string, path: string, warnings: string[] }`
+
+`{ status: "duplicate", duplicate_of: { id, title, source_url }, message: string, warnings: string[] }`
 
 **Behavior on update:** If `id` is provided and exists, the agent is added to `contributors` if not already present.
+
+**Update semantics:** Omitted optional fields preserve existing values. Some fields support explicit clear (for example `source_url: null`, `expires_at: null`, and `derived_from_ids: []`).
 
 #### `lithos_read`
 Read a knowledge file by ID or path.
@@ -298,7 +327,7 @@ Full-text search across knowledge base.
 | `author` | string | No | Filter by author |
 | `path_prefix` | string | No | Filter by path prefix |
 
-**Returns:** `{ results: [{ id, title, snippet, score, path }] }`
+**Returns:** `{ results: [{ id, title, snippet, score, path, source_url, updated_at, is_stale }] }`
 
 **Snippet source:** Tantivy-generated highlight showing matching terms in context.
 
@@ -313,7 +342,7 @@ Semantic similarity search.
 | `threshold` | float | No | Minimum similarity 0-1 (default: from config, 0.3) |
 | `tags` | string[] | No | Filter by tags |
 
-**Returns:** `{ results: [{ id, title, snippet, similarity, path }] }`
+**Returns:** `{ results: [{ id, title, snippet, similarity, path, source_url, updated_at, is_stale }] }`
 
 **Snippet source:** Content of the best-matching chunk for each document.
 

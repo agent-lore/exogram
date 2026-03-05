@@ -1,5 +1,7 @@
 # Research Cache — Introduction
 
+Contract note: write-path request/response semantics in this plan are governed by `unified-write-contract.md`. System-level rollout and compatibility guardrails are governed by `final-architecture-guardrails.md`.
+
 In a multi-agent system, research is the most expensive operation: it consumes API tokens, takes time, and often produces knowledge that another agent already holds. Without a mechanism to check what is already known — and whether it is still valid — agents default to researching from scratch every time, creating duplicate notes and burning budget on redundant work. The research cache addresses this by giving agents a single, low-cost call to ask Lithos "do you already know this, and is it still fresh?" before committing to any external lookup. It introduces an explicit time-to-live field on knowledge documents so that the writing agent can declare how long its findings should be trusted — competitor pricing might be valid for a week, API documentation for a month, breaking news for a few hours. The cache lookup tool then enforces this contract: it returns a direct hit if fresh, high-confidence knowledge exists, a miss with a stale document ID if the knowledge exists but has expired (signalling the agent to refresh and update rather than duplicate), or a clean miss if nothing relevant is stored at all. The goal is not to prevent research — it is to make research a last resort rather than a reflex, and to keep the knowledge base coherent by converging on updated notes rather than accumulating stale copies.
 
 ## The Gap
@@ -58,7 +60,7 @@ async def lithos_write(
     source_task: str | None = None,
     ttl_hours: float | None = None,      # ← ADD: "valid for N hours from now"
     expires_at: str | None = None,       # ← ADD: explicit ISO datetime
-) -> dict[str, str]:
+) -> dict[str, Any]:
 ```
 
 In the body, compute `expires_at_dt` from whichever is provided:
@@ -191,10 +193,10 @@ This requires `SearchResult` in `search.py` to carry `updated_at` and `expires_a
 | File | Change |
 |------|--------|
 | `knowledge.py` | Add `expires_at` + `is_stale` to `KnowledgeMetadata`; update `create()`/`update()` |
-| `server.py` | Add `ttl_hours`/`expires_at` to `lithos_write`; add `lithos_cache_lookup` tool; add freshness to search results |
+| `server.py` | Add `ttl_hours`/`expires_at` to `lithos_write` (using the shared status-based response envelope from source-url dedup + digest v2); add `lithos_cache_lookup` tool; add freshness to search results |
 | `search.py` | Add `updated_at`/`expires_at` to `SearchResult` dataclass and indexing |
 
-No schema migrations, no new dependencies, no new storage. The `expires_at` field is just another YAML frontmatter key — the file watcher picks it up automatically.
+No markdown/frontmatter migration is required; `expires_at` is just another YAML key and old docs remain valid. However, if search backend schema/index shape changes while surfacing freshness fields, startup must follow the same recreate+full-rebuild path defined in `source_url-dedup.md` for Tantivy schema incompatibilities.
 
 ## How Agents Use It
 

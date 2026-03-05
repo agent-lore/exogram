@@ -2,6 +2,8 @@
 
 Combines: "URL deduplication field" + "source_url as indexed field"
 
+Contract note: `lithos_write` request/response semantics in this plan are governed by `unified-write-contract.md`. System-level rollout and compatibility guardrails are governed by `final-architecture-guardrails.md`.
+
 KnowledgeMetadata already has a `source` field, but it holds a **task ID** (via `source_task` in `lithos_write`), it is not indexed for URL provenance, and no collision checks exist. This work adds a new `source_url` field and enforces URL uniqueness.
 
 ## Problem

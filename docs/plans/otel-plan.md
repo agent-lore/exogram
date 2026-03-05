@@ -1,5 +1,7 @@
 # OTEL Instrumentation Plan for Lithos
 
+Guardrail note: system-level rollout and compatibility constraints for this plan are governed by `final-architecture-guardrails.md`.
+
 ## Prerequisites
 
 **Local OTEL stack:** The Collector, Prometheus, Tempo, Loki, Grafana, and Opik infrastructure lives in the [lithos-observability](https://github.com/your-org/lithos-observability) repo. Start it with `docker compose up -d` before enabling telemetry in Lithos.

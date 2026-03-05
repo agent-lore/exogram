@@ -1,0 +1,193 @@
+# Implementation Checklist (Preferred Order)
+
+This checklist defines the preferred execution order across the active plans:
+
+- `source_url-dedup.md`
+- `digest-auto-link-v2.md`
+- `research-cache-plan.md`
+- `otel-plan.md`
+- `bulk-write-v3.md`
+- `lcma-design.md`
+
+Normative references:
+
+- `unified-write-contract.md`
+- `final-architecture-guardrails.md`
+
+---
+
+## Phase 0 - Canonical Contracts and Guardrails
+
+- [x] Create canonical write contract doc (`unified-write-contract.md`)
+- [x] Create system guardrails doc (`final-architecture-guardrails.md`)
+- [x] Update active plans to reference canonical docs
+- [x] Update `docs/SPECIFICATION.md` with pre-1.0 compatibility policy and status envelope
+
+Exit criteria:
+
+- No active plan defines a conflicting write contract
+- API change policy is explicit: MCP can change, on-disk compatibility is required
+
+---
+
+## Phase 1 - Observability Foundation (OTEL)
+
+- [ ] Add optional OTEL dependencies and config
+- [ ] Implement `telemetry.py` no-op + active modes
+- [ ] Wire setup/shutdown in CLI lifecycle
+- [ ] Instrument `knowledge.py`, `search.py`, `coordination.py`, and tool handlers
+- [ ] Add telemetry tests and lifecycle test
+
+Dependencies:
+
+- Phase 0 complete
+
+Exit criteria:
+
+- Core write/search/coordination paths emit spans and baseline metrics
+- Telemetry disabled mode has no functional behavior changes
+
+---
+
+## Phase 2 - Source URL Dedup + Provenance Surface
+
+- [ ] Add `source_url` metadata field and normalization
+- [ ] Add manager-owned dedup map and write-time invariants
+- [ ] Add create/update duplicate behavior using status envelope
+- [ ] Index `source_url` in Tantivy and Chroma metadata
+- [ ] Add startup duplicate audit and deterministic logging
+- [ ] Implement index schema mismatch recreate + full rebuild path
+- [ ] Return `source_url` in read/search/semantic/list responses
+
+Dependencies:
+
+- Phase 0 complete
+- Phase 1 recommended (for migration/rebuild observability)
+
+Exit criteria:
+
+- Duplicate URL writes are consistently blocked by manager invariants
+- Existing on-disk notes remain readable after upgrade
+- Rebuild path succeeds automatically on schema mismatch
+
+---
+
+## Phase 3 - Digest Provenance v2 (`derived_from_ids`)
+
+- [ ] Add `derived_from_ids` frontmatter field + validation/normalization
+- [ ] Add manager provenance indexes (`_doc_to_sources`, `_source_to_derived`, `_unresolved_provenance`)
+- [ ] Implement write semantics (`None` preserve, `[]` clear, list replace)
+- [ ] Add warnings for unresolved source IDs
+- [ ] Add `lithos_provenance` tool (BFS on provenance indexes only)
+- [ ] Keep wiki-link graph behavior unchanged
+
+Dependencies:
+
+- Phase 0 complete
+- Phase 2 recommended (shared provenance fields already surfaced)
+
+Exit criteria:
+
+- Declared lineage is canonical in frontmatter
+- Missing lineage references are non-fatal and queryable
+
+---
+
+## Phase 4 - Research Cache and Freshness
+
+- [ ] Add `expires_at` metadata + staleness helper
+- [ ] Extend `lithos_write` with `ttl_hours`/`expires_at` per unified contract
+- [ ] Add `lithos_cache_lookup`
+- [ ] Add freshness fields (`updated_at`, `is_stale`) to search/semantic responses
+- [ ] Align any search schema changes with rebuild framework
+
+Dependencies:
+
+- Phase 0 complete
+- Phase 2/3 recommended (provenance + dedup stability improves cache quality)
+
+Exit criteria:
+
+- One-call cache lookup reliably returns hit/miss/stale guidance
+- Agents can update stale docs instead of creating duplicates
+
+---
+
+## Phase 5 - Bulk Write v3 (Durable Workflow)
+
+- [ ] Implement batch journal schema and worker lifecycle
+- [ ] Add `lithos_write_batch` and `lithos_batch_status` (and optional `lithos_batch_list`)
+- [ ] Enforce shared single/batch write contract and status envelope per item
+- [ ] Implement best-effort and all-or-nothing apply behavior
+- [ ] Add projection retries/dead-letter behavior
+- [ ] Emit OTEL batch metrics/spans using telemetry foundation
+
+Dependencies:
+
+- Phase 0 complete
+- Phase 1 complete
+- Phase 2 and 3 complete (shared invariants are reused by batch)
+- Phase 4 recommended (freshness fields in unified payload)
+
+Exit criteria:
+
+- Batch and single writes have consistent semantics
+- Durable status and retry behavior are operationally visible
+
+---
+
+## Phase 6 - Reconcile/Repair Tooling
+
+- [ ] Implement `lithos_reconcile` (indices/graph/provenance projection/all)
+- [ ] Add dry-run mode and repair reporting
+- [ ] Add idempotency and crash-safe tests
+
+Dependencies:
+
+- Phases 2 through 5 complete
+
+Exit criteria:
+
+- System can repair projection drift without touching authoritative markdown content
+
+---
+
+## Phase 7 - LCMA Rollout (MVPs in Order)
+
+### MVP 1
+
+- [ ] Add LCMA optional metadata fields (`note_type`, `namespace`, `access_scope`, etc.)
+- [ ] Add `lithos_retrieve` with initial scouts + Terrace 1 rerank
+- [ ] Add receipts logging
+- [ ] Add `edges.db` (`related_to`) and `stats.db` base tables
+- [ ] Add edge/stats tools
+
+### MVP 2
+
+- [ ] Add negative reinforcement and contradiction workflow
+- [ ] Add namespace/scope filtering in scouts
+- [ ] Add WM to LTM consolidation hook on task completion
+- [ ] Add graph scout over NetworkX + edges.db
+
+### MVP 3
+
+- [ ] Add analogy scout and temperature-guided exploration
+- [ ] Add concept node formation + damping
+- [ ] Add embedding-space versioning and transition querying
+
+Dependencies:
+
+- Phases 0 through 6 complete
+
+Exit criteria:
+
+- LCMA features remain additive and consistent with canonical write contract
+- On-disk compatibility preserved throughout rollout
+
+---
+
+## Cross-Phase Conformance (Run Continuously)
+
+- [ ] Maintain one conformance suite across single write, batch write, dedup, provenance, freshness, migration/rebuild, reconcile, and OTEL instrumentation
+- [ ] Block milestone completion if conformance suite regresses
+
