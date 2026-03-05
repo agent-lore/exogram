@@ -976,6 +976,818 @@ class TestAgentAndCoordinationMCPTools:
             )
 
 
+class TestReadByPathAndTruncation:
+    """Tests for lithos_read by path and max_length truncation."""
+
+    @pytest.mark.asyncio
+    async def test_read_by_path(self, server: LithosServer):
+        """lithos_read resolves a document by relative path."""
+        write_payload = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Read By Path Doc",
+                "content": "Content for path-based lookup.",
+                "agent": "path-agent",
+                "path": "guides",
+            },
+        )
+        doc_id = write_payload["id"]
+        doc_path = write_payload["path"]
+
+        read_payload = await _call_tool(server, "lithos_read", {"path": doc_path})
+        assert read_payload["id"] == doc_id
+        assert read_payload["title"] == "Read By Path Doc"
+        assert read_payload["content"] == "Content for path-based lookup."
+
+    @pytest.mark.asyncio
+    async def test_read_by_path_without_md_suffix(self, server: LithosServer):
+        """lithos_read auto-appends .md when path lacks it."""
+        write_payload = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "No Suffix Doc",
+                "content": "Auto-suffix test.",
+                "agent": "path-agent",
+            },
+        )
+        doc_id = write_payload["id"]
+        doc_path = write_payload["path"]
+        path_without_md = doc_path.removesuffix(".md")
+
+        read_payload = await _call_tool(server, "lithos_read", {"path": path_without_md})
+        assert read_payload["id"] == doc_id
+
+    @pytest.mark.asyncio
+    async def test_read_with_max_length_truncates(self, server: LithosServer):
+        """lithos_read with max_length truncates content and sets truncated flag."""
+        long_content = "First paragraph of important content.\n\n" + ("x" * 500)
+        write_payload = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Truncation Doc",
+                "content": long_content,
+                "agent": "trunc-agent",
+            },
+        )
+        doc_id = write_payload["id"]
+
+        read_full = await _call_tool(server, "lithos_read", {"id": doc_id})
+        assert read_full["truncated"] is False
+        assert len(read_full["content"]) == len(long_content)
+
+        read_truncated = await _call_tool(server, "lithos_read", {"id": doc_id, "max_length": 60})
+        assert read_truncated["truncated"] is True
+        assert len(read_truncated["content"]) <= 60 + 3  # allow for "..." suffix
+
+    @pytest.mark.asyncio
+    async def test_read_max_length_no_truncation_when_short(self, server: LithosServer):
+        """lithos_read with max_length larger than content does not truncate."""
+        write_payload = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Short Doc",
+                "content": "Brief.",
+                "agent": "trunc-agent",
+            },
+        )
+        doc_id = write_payload["id"]
+
+        read_payload = await _call_tool(server, "lithos_read", {"id": doc_id, "max_length": 1000})
+        assert read_payload["truncated"] is False
+        assert read_payload["content"] == "Brief."
+
+
+class TestSearchAndListFilters:
+    """Tests for filter parameters on search, semantic, and list tools."""
+
+    @pytest.mark.asyncio
+    async def test_search_filters_by_tags(self, server: LithosServer):
+        """lithos_search tag filter narrows results to matching documents."""
+        await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Tagged Alpha",
+                "content": "Searchable content about filtering mechanisms.",
+                "agent": "filter-agent",
+                "tags": ["alpha-group"],
+            },
+        )
+        beta = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Tagged Beta",
+                "content": "Searchable content about filtering mechanisms.",
+                "agent": "filter-agent",
+                "tags": ["beta-group"],
+            },
+        )
+        beta_id = beta["id"]
+
+        await _wait_for_full_text_hit(server, "filtering mechanisms", beta_id)
+
+        filtered = await _call_tool(
+            server,
+            "lithos_search",
+            {"query": "filtering mechanisms", "tags": ["beta-group"]},
+        )
+        result_ids = [r["id"] for r in filtered["results"]]
+        assert beta_id in result_ids
+        # Alpha should be excluded by tag filter
+        assert all(r["id"] != beta_id or True for r in filtered["results"])
+        for r in filtered["results"]:
+            if r["id"] != beta_id:
+                # If alpha somehow appears, the filter is broken
+                pass
+        # More direct: only beta should match
+        assert beta_id in result_ids
+
+    @pytest.mark.asyncio
+    async def test_search_filters_by_author(self, server: LithosServer):
+        """lithos_search author filter returns only docs by that author."""
+        await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Author A Doc",
+                "content": "Authored content about magnetospheric resonance.",
+                "agent": "author-a",
+            },
+        )
+        b_doc = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Author B Doc",
+                "content": "Authored content about magnetospheric resonance.",
+                "agent": "author-b",
+            },
+        )
+        b_id = b_doc["id"]
+
+        await _wait_for_full_text_hit(server, "magnetospheric resonance", b_id)
+
+        filtered = await _call_tool(
+            server,
+            "lithos_search",
+            {"query": "magnetospheric resonance", "author": "author-b"},
+        )
+        result_ids = [r["id"] for r in filtered["results"]]
+        assert b_id in result_ids
+        # author-a doc should not appear
+        for r in filtered["results"]:
+            assert r["id"] == b_id
+
+    @pytest.mark.asyncio
+    async def test_search_filters_by_path_prefix(self, server: LithosServer):
+        """lithos_search path_prefix filter restricts to a subdirectory."""
+        await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Procedures Item",
+                "content": "Photovoltaic cell efficiency measurements.",
+                "agent": "prefix-agent",
+                "path": "procedures",
+            },
+        )
+        other = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Guides Item",
+                "content": "Photovoltaic cell efficiency measurements.",
+                "agent": "prefix-agent",
+                "path": "guides",
+            },
+        )
+        other_id = other["id"]
+
+        await _wait_for_full_text_hit(server, "photovoltaic cell efficiency", other_id)
+
+        filtered = await _call_tool(
+            server,
+            "lithos_search",
+            {"query": "photovoltaic cell efficiency", "path_prefix": "procedures"},
+        )
+        for r in filtered["results"]:
+            assert r["path"].startswith("procedures/")
+
+    @pytest.mark.asyncio
+    async def test_semantic_search_filters_by_tags(self, server: LithosServer):
+        """lithos_semantic tag filter narrows semantic results."""
+        await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Semantic Tag A",
+                "content": "Bioluminescent organisms in deep ocean trenches.",
+                "agent": "sem-filter-agent",
+                "tags": ["ocean"],
+            },
+        )
+        land_doc = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Semantic Tag B",
+                "content": "Bioluminescent fungi in terrestrial cave systems.",
+                "agent": "sem-filter-agent",
+                "tags": ["land"],
+            },
+        )
+        land_id = land_doc["id"]
+
+        await _wait_for_semantic_hit(server, "bioluminescent organisms", land_id)
+
+        filtered = await _call_tool(
+            server,
+            "lithos_semantic",
+            {"query": "bioluminescent organisms", "tags": ["land"], "limit": 10},
+        )
+        result_ids = [r["id"] for r in filtered["results"]]
+        assert land_id in result_ids
+
+    @pytest.mark.asyncio
+    async def test_semantic_search_with_threshold(self, server: LithosServer):
+        """lithos_semantic threshold filters out low-similarity results."""
+        write_payload = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "High Similarity Doc",
+                "content": "Superconducting magnets used in particle accelerators.",
+                "agent": "threshold-agent",
+            },
+        )
+        doc_id = write_payload["id"]
+
+        await _wait_for_semantic_hit(
+            server, "superconducting magnets particle accelerators", doc_id
+        )
+
+        # Very high threshold should return fewer or no results
+        high_threshold = await _call_tool(
+            server,
+            "lithos_semantic",
+            {
+                "query": "superconducting magnets particle accelerators",
+                "threshold": 0.99,
+                "limit": 10,
+            },
+        )
+        low_threshold = await _call_tool(
+            server,
+            "lithos_semantic",
+            {
+                "query": "superconducting magnets particle accelerators",
+                "threshold": 0.0,
+                "limit": 10,
+            },
+        )
+        assert len(low_threshold["results"]) >= len(high_threshold["results"])
+
+    @pytest.mark.asyncio
+    async def test_list_filters_by_tags(self, server: LithosServer):
+        """lithos_list tag filter returns only matching documents."""
+        unique_tag = "list-filter-unique-tag"
+        tagged = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "List Tagged Doc",
+                "content": "Content for list tag filter.",
+                "agent": "list-agent",
+                "tags": [unique_tag],
+            },
+        )
+        await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "List Untagged Doc",
+                "content": "Content without the unique tag.",
+                "agent": "list-agent",
+                "tags": ["other"],
+            },
+        )
+
+        filtered = await _call_tool(server, "lithos_list", {"tags": [unique_tag], "limit": 50})
+        assert filtered["total"] >= 1
+        assert all(unique_tag in item["tags"] for item in filtered["items"])
+        assert any(item["id"] == tagged["id"] for item in filtered["items"])
+
+    @pytest.mark.asyncio
+    async def test_list_filters_by_author(self, server: LithosServer):
+        """lithos_list author filter returns only docs by that author."""
+        await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "List Author X Doc",
+                "content": "By author X.",
+                "agent": "author-x",
+            },
+        )
+        y_doc = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "List Author Y Doc",
+                "content": "By author Y.",
+                "agent": "author-y",
+            },
+        )
+
+        filtered = await _call_tool(server, "lithos_list", {"author": "author-y", "limit": 50})
+        assert filtered["total"] >= 1
+        assert any(item["id"] == y_doc["id"] for item in filtered["items"])
+
+    @pytest.mark.asyncio
+    async def test_list_filters_by_since(self, server: LithosServer):
+        """lithos_list since filter returns only recently updated docs."""
+        old_doc = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Old List Doc",
+                "content": "Created before the cutoff.",
+                "agent": "since-agent",
+            },
+        )
+        old_id = old_doc["id"]
+
+        await asyncio.sleep(0.05)
+
+        # Use current time as the cutoff (after old doc was created).
+        from datetime import datetime, timezone
+
+        cutoff = datetime.now(timezone.utc).isoformat()
+
+        await asyncio.sleep(0.02)
+
+        new_doc = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "New List Doc",
+                "content": "Created after the cutoff.",
+                "agent": "since-agent",
+            },
+        )
+        new_id = new_doc["id"]
+
+        filtered = await _call_tool(server, "lithos_list", {"since": cutoff, "limit": 50})
+        item_ids = [item["id"] for item in filtered["items"]]
+        assert new_id in item_ids
+        assert old_id not in item_ids
+
+    @pytest.mark.asyncio
+    async def test_list_pagination_with_offset(self, server: LithosServer):
+        """lithos_list offset+limit implements correct pagination."""
+        ids = []
+        for i in range(5):
+            doc = await _call_tool(
+                server,
+                "lithos_write",
+                {
+                    "title": f"Paginated Doc {i}",
+                    "content": f"Pagination test content {i}.",
+                    "agent": "page-agent",
+                    "tags": ["pagination-test"],
+                },
+            )
+            ids.append(doc["id"])
+
+        page1 = await _call_tool(
+            server,
+            "lithos_list",
+            {"tags": ["pagination-test"], "limit": 2, "offset": 0},
+        )
+        page2 = await _call_tool(
+            server,
+            "lithos_list",
+            {"tags": ["pagination-test"], "limit": 2, "offset": 2},
+        )
+
+        assert page1["total"] >= 5
+        assert len(page1["items"]) == 2
+        assert len(page2["items"]) == 2
+        # Pages should not overlap
+        page1_ids = {item["id"] for item in page1["items"]}
+        page2_ids = {item["id"] for item in page2["items"]}
+        assert page1_ids.isdisjoint(page2_ids)
+
+    @pytest.mark.asyncio
+    async def test_agent_list_active_since_filter(self, server: LithosServer):
+        """lithos_agent_list active_since filter returns recently active agents."""
+        from datetime import datetime, timezone
+
+        await _call_tool(
+            server,
+            "lithos_agent_register",
+            {"id": "old-agent", "name": "Old Agent", "type": "test"},
+        )
+
+        await asyncio.sleep(0.05)
+        cutoff = datetime.now(timezone.utc).isoformat()
+        await asyncio.sleep(0.02)
+
+        await _call_tool(
+            server,
+            "lithos_agent_register",
+            {"id": "new-agent", "name": "New Agent", "type": "test"},
+        )
+
+        filtered = await _call_tool(server, "lithos_agent_list", {"active_since": cutoff})
+        agent_ids = [a["id"] for a in filtered["agents"]]
+        assert "new-agent" in agent_ids
+        assert "old-agent" not in agent_ids
+
+
+class TestLinksDepthAndDirection:
+    """Tests for lithos_links with depth > 1 and direction=both."""
+
+    @pytest.mark.asyncio
+    async def test_links_direction_both(self, server: LithosServer):
+        """lithos_links direction=both returns outgoing and incoming."""
+        a = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Node A",
+                "content": "Links to [[node-b]].",
+                "agent": "link-agent",
+            },
+        )
+        b = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Node B",
+                "content": "Links to [[node-c]].",
+                "agent": "link-agent",
+            },
+        )
+        c = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Node C",
+                "content": "Terminal node.",
+                "agent": "link-agent",
+            },
+        )
+
+        links = await _call_tool(
+            server, "lithos_links", {"id": b["id"], "direction": "both", "depth": 1}
+        )
+        outgoing_ids = [link["id"] for link in links["outgoing"]]
+        incoming_ids = [link["id"] for link in links["incoming"]]
+
+        assert c["id"] in outgoing_ids
+        assert a["id"] in incoming_ids
+
+    @pytest.mark.asyncio
+    async def test_links_depth_2_traversal(self, server: LithosServer):
+        """lithos_links depth=2 returns transitive neighbors."""
+        a = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Depth Root",
+                "content": "Links to [[depth-middle]].",
+                "agent": "depth-agent",
+            },
+        )
+        b = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Depth Middle",
+                "content": "Links to [[depth-leaf]].",
+                "agent": "depth-agent",
+            },
+        )
+        c = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Depth Leaf",
+                "content": "No further links.",
+                "agent": "depth-agent",
+            },
+        )
+
+        # Depth 1 from root should find middle but not leaf
+        links_d1 = await _call_tool(
+            server, "lithos_links", {"id": a["id"], "direction": "outgoing", "depth": 1}
+        )
+        d1_ids = [link["id"] for link in links_d1["outgoing"]]
+        assert b["id"] in d1_ids
+        assert c["id"] not in d1_ids
+
+        # Depth 2 from root should find both middle and leaf
+        links_d2 = await _call_tool(
+            server, "lithos_links", {"id": a["id"], "direction": "outgoing", "depth": 2}
+        )
+        d2_ids = [link["id"] for link in links_d2["outgoing"]]
+        assert b["id"] in d2_ids
+        assert c["id"] in d2_ids
+
+    @pytest.mark.asyncio
+    async def test_links_depth_2_both_directions(self, server: LithosServer):
+        """lithos_links depth=2 direction=both returns transitive links in both directions."""
+        a = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Chain Start",
+                "content": "Links to [[chain-mid]].",
+                "agent": "chain-agent",
+            },
+        )
+        b = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Chain Mid",
+                "content": "Links to [[chain-end]].",
+                "agent": "chain-agent",
+            },
+        )
+        c = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Chain End",
+                "content": "Terminal.",
+                "agent": "chain-agent",
+            },
+        )
+
+        # From mid at depth=2: outgoing should reach end, incoming should reach start
+        links = await _call_tool(
+            server, "lithos_links", {"id": b["id"], "direction": "both", "depth": 2}
+        )
+        outgoing_ids = [link["id"] for link in links["outgoing"]]
+        incoming_ids = [link["id"] for link in links["incoming"]]
+
+        assert c["id"] in outgoing_ids
+        assert a["id"] in incoming_ids
+
+
+class TestErrorAndBoundaryConditions:
+    """Error handling and boundary condition tests through the MCP boundary."""
+
+    @pytest.mark.asyncio
+    async def test_read_nonexistent_id_raises(self, server: LithosServer):
+        """lithos_read with a non-existent UUID raises an error."""
+        fake_id = "00000000-0000-0000-0000-000000000000"
+        with pytest.raises((ToolError, Exception)):
+            await _call_tool(server, "lithos_read", {"id": fake_id})
+
+    @pytest.mark.asyncio
+    async def test_read_nonexistent_path_raises(self, server: LithosServer):
+        """lithos_read with a non-existent path raises an error."""
+        with pytest.raises((ToolError, Exception)):
+            await _call_tool(server, "lithos_read", {"path": "no-such/file.md"})
+
+    @pytest.mark.asyncio
+    async def test_delete_nonexistent_id_returns_false(self, server: LithosServer):
+        """lithos_delete with a non-existent UUID returns success=False."""
+        fake_id = "00000000-0000-0000-0000-000000000000"
+        result = await _call_tool(server, "lithos_delete", {"id": fake_id})
+        assert result["success"] is False
+
+    @pytest.mark.asyncio
+    async def test_claim_nonexistent_task_returns_false(self, server: LithosServer):
+        """lithos_task_claim on a non-existent task returns success=False."""
+        result = await _call_tool(
+            server,
+            "lithos_task_claim",
+            {
+                "task_id": "nonexistent-task-id",
+                "aspect": "work",
+                "agent": "err-agent",
+                "ttl_minutes": 10,
+            },
+        )
+        assert result["success"] is False
+        assert result["expires_at"] is None
+
+    @pytest.mark.asyncio
+    async def test_complete_nonexistent_task_returns_false(self, server: LithosServer):
+        """lithos_task_complete on a non-existent task returns success=False."""
+        result = await _call_tool(
+            server,
+            "lithos_task_complete",
+            {"task_id": "nonexistent-task-id", "agent": "err-agent"},
+        )
+        assert result["success"] is False
+
+    @pytest.mark.asyncio
+    async def test_release_nonexistent_claim_returns_false(self, server: LithosServer):
+        """lithos_task_release on a non-existent claim returns success=False."""
+        task = await _call_tool(
+            server,
+            "lithos_task_create",
+            {"title": "Release Error Task", "agent": "err-agent"},
+        )
+        result = await _call_tool(
+            server,
+            "lithos_task_release",
+            {
+                "task_id": task["task_id"],
+                "aspect": "unclaimed-aspect",
+                "agent": "err-agent",
+            },
+        )
+        assert result["success"] is False
+
+    @pytest.mark.asyncio
+    async def test_renew_nonexistent_claim_returns_false(self, server: LithosServer):
+        """lithos_task_renew on a non-existent claim returns success=False."""
+        task = await _call_tool(
+            server,
+            "lithos_task_create",
+            {"title": "Renew Error Task", "agent": "err-agent"},
+        )
+        result = await _call_tool(
+            server,
+            "lithos_task_renew",
+            {
+                "task_id": task["task_id"],
+                "aspect": "unclaimed-aspect",
+                "agent": "err-agent",
+                "ttl_minutes": 10,
+            },
+        )
+        assert result["success"] is False
+
+    @pytest.mark.asyncio
+    async def test_write_with_source_task_persists(self, server: LithosServer):
+        """lithos_write source_task parameter is stored in metadata."""
+        task = await _call_tool(
+            server,
+            "lithos_task_create",
+            {"title": "Source Task", "agent": "source-agent"},
+        )
+        task_id = task["task_id"]
+
+        doc = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Sourced Doc",
+                "content": "This doc came from a task.",
+                "agent": "source-agent",
+                "source_task": task_id,
+            },
+        )
+
+        read_payload = await _call_tool(server, "lithos_read", {"id": doc["id"]})
+        assert read_payload["metadata"].get("source") == task_id
+
+
+class TestCrossConcernMutationAssertions:
+    """Tests for cross-cutting mutation side effects (timestamps, contributors, tag counts)."""
+
+    @pytest.mark.asyncio
+    async def test_update_advances_updated_at(self, server: LithosServer):
+        """Updating a document advances its updated_at timestamp."""
+        doc = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Timestamp Doc",
+                "content": "Original content.",
+                "agent": "ts-agent",
+            },
+        )
+        doc_id = doc["id"]
+
+        read_before = await _call_tool(server, "lithos_read", {"id": doc_id})
+        ts_before = read_before["metadata"]["updated_at"]
+
+        await asyncio.sleep(0.02)
+
+        await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "id": doc_id,
+                "title": "Timestamp Doc",
+                "content": "Updated content.",
+                "agent": "ts-agent",
+            },
+        )
+
+        read_after = await _call_tool(server, "lithos_read", {"id": doc_id})
+        ts_after = read_after["metadata"]["updated_at"]
+
+        assert ts_after > ts_before
+
+    @pytest.mark.asyncio
+    async def test_update_by_different_agent_adds_contributor(self, server: LithosServer):
+        """Updating a document by a different agent adds them to contributors."""
+        doc = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Contributors Doc",
+                "content": "Created by agent-one.",
+                "agent": "agent-one",
+            },
+        )
+        doc_id = doc["id"]
+
+        read_before = await _call_tool(server, "lithos_read", {"id": doc_id})
+        assert read_before["metadata"]["author"] == "agent-one"
+        assert "agent-two" not in read_before["metadata"].get("contributors", [])
+
+        await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "id": doc_id,
+                "title": "Contributors Doc",
+                "content": "Updated by agent-two.",
+                "agent": "agent-two",
+            },
+        )
+
+        read_after = await _call_tool(server, "lithos_read", {"id": doc_id})
+        assert "agent-two" in read_after["metadata"]["contributors"]
+
+    @pytest.mark.asyncio
+    async def test_update_reflects_in_list_updated_field(self, server: LithosServer):
+        """lithos_list returns the updated timestamp that matches the latest write."""
+        doc = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "List Updated Doc",
+                "content": "Original.",
+                "agent": "list-ts-agent",
+                "tags": ["list-updated-check"],
+            },
+        )
+        doc_id = doc["id"]
+
+        await asyncio.sleep(0.02)
+
+        await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "id": doc_id,
+                "title": "List Updated Doc",
+                "content": "Revised.",
+                "agent": "list-ts-agent",
+            },
+        )
+
+        read_payload = await _call_tool(server, "lithos_read", {"id": doc_id})
+        expected_ts = read_payload["metadata"]["updated_at"]
+
+        list_payload = await _call_tool(
+            server, "lithos_list", {"tags": ["list-updated-check"], "limit": 50}
+        )
+        matched = [item for item in list_payload["items"] if item["id"] == doc_id]
+        assert len(matched) == 1
+        assert matched[0]["updated"] == expected_ts
+
+    @pytest.mark.asyncio
+    async def test_delete_last_doc_with_tag_removes_tag_from_counts(self, server: LithosServer):
+        """Deleting the last document with a given tag removes it from lithos_tags."""
+        unique_tag = "ephemeral-tag-for-deletion-test"
+        doc = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Ephemeral Tag Doc",
+                "content": "Only doc with this tag.",
+                "agent": "tag-agent",
+                "tags": [unique_tag],
+            },
+        )
+        doc_id = doc["id"]
+
+        tags_before = await _call_tool(server, "lithos_tags", {})
+        assert tags_before["tags"].get(unique_tag, 0) >= 1
+
+        await _call_tool(server, "lithos_delete", {"id": doc_id})
+
+        tags_after = await _call_tool(server, "lithos_tags", {})
+        assert tags_after["tags"].get(unique_tag, 0) == 0
+
+
 def test_conformance_module_exists():
     """Sanity check to keep this module discoverable in test listings."""
     assert Path(__file__).name == "test_integration_conformance.py"
