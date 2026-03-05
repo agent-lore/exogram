@@ -137,7 +137,8 @@ Under manager-owned lock:
 For `mode="all_or_nothing"`:
 - Stage file changes to temp files.
 - If any write-phase item is not applied (`created`/`updated`), including `duplicate`, abort batch write-phase and do not publish staged files.
-- Mark all items as failed/aborted with explicit codes.
+- Mark all affected items as failed/aborted with explicit codes.
+- Use `batch_aborted_non_apply_outcome` for items aborted due to an earlier non-apply outcome in the batch.
 
 For `mode="best_effort"`:
 - Apply independently and continue after per-item failures.
@@ -173,6 +174,7 @@ Return stable machine-readable codes:
 - `index_backend_unavailable`
 - `graph_update_failed`
 - `projection_retry_exhausted`
+- `batch_aborted_non_apply_outcome`
 - `internal_error`
 
 Human-readable `message` accompanies each code.

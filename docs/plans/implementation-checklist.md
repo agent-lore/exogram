@@ -20,7 +20,7 @@ Normative references:
 
 - [x] Create canonical write contract doc (`unified-write-contract.md`)
 - [x] Create system guardrails doc (`final-architecture-guardrails.md`)
-- [ ] Define target search schema registry doc (Tantivy + semantic metadata fields)
+- [x] Define target search schema registry doc (Tantivy + semantic metadata fields)
 - [x] Update active plans to reference canonical docs
 - [x] Update `docs/SPECIFICATION.md` with pre-1.0 compatibility policy and status envelope
 

@@ -68,7 +68,12 @@ In the body, enforce mutual exclusion and compute `expires_at_dt`:
 ```python
 expires_at_dt = None
 if ttl_hours is not None and expires_at is not None:
-    raise ValueError("Provide either ttl_hours or expires_at, not both")
+    return {
+        "error": {
+            "code": "invalid_input",
+            "message": "Provide either ttl_hours or expires_at, not both.",
+        }
+    }
 if ttl_hours is not None:
     expires_at_dt = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
 elif expires_at is not None:
