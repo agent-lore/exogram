@@ -38,10 +38,10 @@ Add optional param:
 
 Semantics:
 - Create:
-  - `None` => store `[]`
+  - omitted or `None` => store `[]`
   - non-empty list => validate/normalize/store
 - Update:
-  - `None` => preserve existing value
+  - omitted or `None` => preserve existing value
   - `[]` => clear
   - non-empty list => replace entire set
 
@@ -72,6 +72,11 @@ Returns:
 - `sources`: nodes this document derives from
 - `derived`: nodes derived from this document
 - optional `unresolved_sources` entries for unknown IDs
+
+Canonical lineage note:
+
+- `lithos_provenance` is the authoritative provenance query interface.
+- Any future projected `derived_from` representation in LCMA `edges.db` is an accelerator, not a replacement API.
 
 Depth behavior:
 - BFS over provenance indexes only (not wiki-link edges)

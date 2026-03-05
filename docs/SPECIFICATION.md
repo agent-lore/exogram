@@ -250,6 +250,7 @@ Normative contract references for the write path:
 
 - `docs/plans/unified-write-contract.md`
 - `docs/plans/final-architecture-guardrails.md`
+- `docs/plans/target-search-schema.md` (search projection schema registry)
 
 #### `lithos_write`
 Create or update a knowledge file.

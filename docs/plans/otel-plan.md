@@ -745,6 +745,10 @@ All metrics are accessed via the lazy `lithos_metrics` singleton (see telemetry.
 | `lithos.coordination.operations` | Counter | Coordination ops, attr: `op` |
 | `lithos.coordination.active_claims` | ObservableGauge | Current non-expired claims (DB-derived) |
 
+Extension rule for later subsystems (e.g., batch writes):
+
+- Group additional instruments under subsystem-prefixed names (for example `lithos.batch.*`) and expose them through structured accessors (e.g., a `batch` metric group) to avoid a flat, unbounded metrics class.
+
 ---
 
 ## Phase 3: LLM Tracing (Future)

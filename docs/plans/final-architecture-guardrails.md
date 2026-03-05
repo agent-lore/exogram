@@ -73,6 +73,10 @@ Responsibilities:
 - report counts: scanned, repaired, failed, skipped
 - support dry-run preview for safe operations
 
+Phasing rule:
+
+- Before provenance projection storage exists (`edges.db` derived projection), `scope="provenance_projection"` must return a deterministic no-op result (`supported: false`, `reason: "not_enabled"`), not an error.
+
 ## 6) Observability Baseline
 
 All new subsystems use OTEL foundation (`telemetry.py`, `traced`, `lithos_metrics`).
@@ -87,6 +91,12 @@ Sensitive-data policy:
 
 - do not emit raw note content, raw prompts, or full queries in span attributes by default
 - prefer hashed or length-based query attributes when needed
+
+## 6.1 Provenance API Authority
+
+- Canonical lineage queries use `lithos_provenance` (frontmatter/index authority).
+- Edge queries (`lithos_edge_list`) are graph/learning oriented and may include projected lineage edges.
+- If results diverge, lineage answers follow `lithos_provenance`.
 
 ## 7) Conformance Test Matrix
 
@@ -111,3 +121,10 @@ Until explicit auth exists, enforce conservative defaults:
 - namespace and scope filters are always applied in retrieval/ranking paths
 - telemetry redaction is on by default
 
+## 9) Target Search Schema Registry
+
+Maintain one explicit target search schema registry in docs (`target-search-schema.md`), and update it whenever schema-affecting fields are added.
+
+Upgrade rule:
+
+- batch schema-breaking index changes when practical to avoid repeated full rebuilds across adjacent releases.

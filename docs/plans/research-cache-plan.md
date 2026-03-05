@@ -1,6 +1,6 @@
 # Research Cache — Introduction
 
-Contract note: write-path request/response semantics in this plan are governed by `unified-write-contract.md`. System-level rollout and compatibility guardrails are governed by `final-architecture-guardrails.md`.
+Contract note: write-path request/response semantics in this plan are governed by `unified-write-contract.md`. System-level rollout and compatibility guardrails are governed by `final-architecture-guardrails.md`. Search schema targets are governed by `target-search-schema.md`.
 
 In a multi-agent system, research is the most expensive operation: it consumes API tokens, takes time, and often produces knowledge that another agent already holds. Without a mechanism to check what is already known — and whether it is still valid — agents default to researching from scratch every time, creating duplicate notes and burning budget on redundant work. The research cache addresses this by giving agents a single, low-cost call to ask Lithos "do you already know this, and is it still fresh?" before committing to any external lookup. It introduces an explicit time-to-live field on knowledge documents so that the writing agent can declare how long its findings should be trusted — competitor pricing might be valid for a week, API documentation for a month, breaking news for a few hours. The cache lookup tool then enforces this contract: it returns a direct hit if fresh, high-confidence knowledge exists, a miss with a stale document ID if the knowledge exists but has expired (signalling the agent to refresh and update rather than duplicate), or a clean miss if nothing relevant is stored at all. The goal is not to prevent research — it is to make research a last resort rather than a reflex, and to keep the knowledge base coherent by converging on updated notes rather than accumulating stale copies.
 
@@ -63,10 +63,12 @@ async def lithos_write(
 ) -> dict[str, Any]:
 ```
 
-In the body, compute `expires_at_dt` from whichever is provided:
+In the body, enforce mutual exclusion and compute `expires_at_dt`:
 
 ```python
 expires_at_dt = None
+if ttl_hours is not None and expires_at is not None:
+    raise ValueError("Provide either ttl_hours or expires_at, not both")
 if ttl_hours is not None:
     expires_at_dt = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
 elif expires_at is not None:
@@ -89,6 +91,7 @@ This is the main addition. One call, returns hit/miss:
 @self.mcp.tool()
 async def lithos_cache_lookup(
     query: str,
+    source_url: str | None = None,
     max_age_hours: float | None = None,
     min_confidence: float = 0.5,
     limit: int = 3,
@@ -101,6 +104,8 @@ async def lithos_cache_lookup(
 
     Args:
         query: What you're about to research
+        source_url: Optional canonical URL for exact dedup-aware cache lookup.
+                    When provided, exact URL match is preferred before semantic fallback.
         max_age_hours: Reject docs older than N hours (uses updated_at).
                        If None, only expires_at is checked.
         min_confidence: Minimum confidence score (default: 0.5)
@@ -114,7 +119,15 @@ async def lithos_cache_lookup(
                       (signals: re-research and update, don't create new)
         stale_id: str — ID of stale doc to update (if stale_exists)
     """
-    results = self.search.semantic_search(query=query, limit=limit, tags=tags)
+    # Fast path: exact source_url match when caller knows the URL.
+    if source_url:
+        exact = await self.knowledge.find_by_source_url(source_url)  # manager helper
+        if exact:
+            results = [exact]  # short-circuit to known document
+        else:
+            results = self.search.semantic_search(query=query, limit=limit, tags=tags)
+    else:
+        results = self.search.semantic_search(query=query, limit=limit, tags=tags)
 
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(hours=max_age_hours) if max_age_hours else None
@@ -168,6 +181,8 @@ async def lithos_cache_lookup(
 ```
 
 The `stale_id` return is important — it tells the agent to update the existing note rather than create a duplicate.
+
+Helper note: `_normalize_datetime(...)` refers to the existing normalization utility in `knowledge.py` used for timezone-safe comparisons.
 
 ## Change 4 — `server.py`: Return freshness in search results
 

@@ -276,7 +276,7 @@ This is intentionally “minimum viable” while supporting v1 + v2.
 
 ## 4.1 Directory Layout
 
-The existing Lithos directory structure is preserved. LCMA consolidates all SQLite databases under `data/.lithos/` (coordination.db is moved from `data/` root; see migration note in §6 MVP 1).
+The existing Lithos directory structure is preserved. LCMA consolidates all SQLite databases under `data/.lithos/`. `coordination.db` is already migrated by current code and should not be re-migrated in LCMA work.
 
 ```
 data/                              # configurable via StorageConfig.data_dir
@@ -288,7 +288,7 @@ data/                              # configurable via StorageConfig.data_dir
   .chroma/                         # existing: ChromaDB embeddings (all-MiniLM-L6-v2)
   .graph/                          # existing: NetworkX wiki-link graph (pickle)
   .lithos/                         # SQLite stores + LCMA data
-    coordination.db                #   agents, tasks, claims, findings (moved from data/ root)
+    coordination.db                #   agents, tasks, claims, findings
     edges.db                       #   typed weighted edges (separate from NetworkX)
     stats.db                       #   usage stats, salience, decay
     receipts.jsonl                 #   Auditor logs
@@ -959,7 +959,7 @@ Each MVP builds on the existing Lithos infrastructure. Existing tools are extend
 
 ## MVP 1 (3 scouts + Terrace 1 — wraps existing engines)
 
-- Move `coordination.db` from `data/` root into `data/.lithos/` (auto-migrated on first startup)
+- Verify existing `coordination.db` migration path remains stable (already implemented)
 - `lithos_retrieve` tool orchestrating scouts internally
 - Scouts: vector (ChromaDB), lexical (Tantivy), tags/recency (KnowledgeManager)
 - Basic rerank with `note_type` priors (requires new optional frontmatter fields)
@@ -1015,6 +1015,11 @@ Each MVP builds on the existing Lithos infrastructure. Existing tools are extend
 - `lithos_conflict_resolve` — contradiction resolution
 - `lithos_node_stats` — view/query salience and usage stats
 - `lithos_receipts` — query retrieval audit history
+
+Provenance query policy:
+
+- Canonical lineage queries use `lithos_provenance` (frontmatter/index based).
+- `lithos_edge_list` is for typed LCMA edges and projected relationships; it is not the canonical lineage API.
 
 ### Existing frontmatter fields preserved
 

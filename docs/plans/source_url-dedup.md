@@ -2,7 +2,7 @@
 
 Combines: "URL deduplication field" + "source_url as indexed field"
 
-Contract note: `lithos_write` request/response semantics in this plan are governed by `unified-write-contract.md`. System-level rollout and compatibility guardrails are governed by `final-architecture-guardrails.md`.
+Contract note: `lithos_write` request/response semantics in this plan are governed by `unified-write-contract.md`. System-level rollout and compatibility guardrails are governed by `final-architecture-guardrails.md`. Search schema targets are governed by `target-search-schema.md`.
 
 KnowledgeMetadata already has a `source` field, but it holds a **task ID** (via `source_task` in `lithos_write`), it is not indexed for URL provenance, and no collision checks exist. This work adds a new `source_url` field and enforces URL uniqueness.
 
@@ -68,12 +68,13 @@ Behavior:
 Since breaking contract is acceptable, make response shape explicit and status-based:
 
 ```python
-{"status": "created", "id": "...", "path": "..."}
-{"status": "updated", "id": "...", "path": "..."}
+{"status": "created", "id": "...", "path": "...", "warnings": []}
+{"status": "updated", "id": "...", "path": "...", "warnings": []}
 {
     "status": "duplicate",
     "duplicate_of": {"id": "...", "title": "...", "source_url": "..."},
-    "message": "A document with this source_url already exists."
+    "message": "A document with this source_url already exists.",
+    "warnings": []
 }
 ```
 

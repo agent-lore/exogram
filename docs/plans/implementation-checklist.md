@@ -20,6 +20,7 @@ Normative references:
 
 - [x] Create canonical write contract doc (`unified-write-contract.md`)
 - [x] Create system guardrails doc (`final-architecture-guardrails.md`)
+- [ ] Define target search schema registry doc (Tantivy + semantic metadata fields)
 - [x] Update active plans to reference canonical docs
 - [x] Update `docs/SPECIFICATION.md` with pre-1.0 compatibility policy and status envelope
 
@@ -27,6 +28,7 @@ Exit criteria:
 
 - No active plan defines a conflicting write contract
 - API change policy is explicit: MCP can change, on-disk compatibility is required
+- Target index schema is documented in one place before schema-affecting implementation starts
 
 ---
 
@@ -100,6 +102,7 @@ Exit criteria:
 - [ ] Add `lithos_cache_lookup`
 - [ ] Add freshness fields (`updated_at`, `is_stale`) to search/semantic responses
 - [ ] Align any search schema changes with rebuild framework
+- [ ] If feasible, batch Phase 2 + Phase 4 Tantivy schema changes into one rebuild window
 
 Dependencies:
 
@@ -138,7 +141,8 @@ Exit criteria:
 
 ## Phase 6 - Reconcile/Repair Tooling
 
-- [ ] Implement `lithos_reconcile` (indices/graph/provenance projection/all)
+- [ ] Implement `lithos_reconcile` core scopes (`indices`/`graph`/`all`)
+- [ ] Implement deterministic no-op behavior for `provenance_projection` when projection store is not enabled
 - [ ] Add dry-run mode and repair reporting
 - [ ] Add idempotency and crash-safe tests
 
@@ -160,6 +164,7 @@ Exit criteria:
 - [ ] Add `lithos_retrieve` with initial scouts + Terrace 1 rerank
 - [ ] Add receipts logging
 - [ ] Add `edges.db` (`related_to`) and `stats.db` base tables
+- [ ] Enable `lithos_reconcile(scope="provenance_projection")` real repair path once projection store exists
 - [ ] Add edge/stats tools
 
 ### MVP 2
@@ -190,4 +195,3 @@ Exit criteria:
 
 - [ ] Maintain one conformance suite across single write, batch write, dedup, provenance, freshness, migration/rebuild, reconcile, and OTEL instrumentation
 - [ ] Block milestone completion if conformance suite regresses
-

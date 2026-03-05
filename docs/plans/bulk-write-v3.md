@@ -47,6 +47,8 @@ lithos_write_batch(
 - optional LCMA metadata: `note_type`, `namespace`, `access_scope`, `entities`, `status`, `schema_version`
 - optional: `idempotency_key` (per-item override)
 
+Note: until LCMA metadata support lands, LCMA-only fields may be rejected as unsupported input.
+
 `UpdateItem`:
 - `id`, `agent`
 - optional mutable fields as above
@@ -134,7 +136,7 @@ Under manager-owned lock:
 
 For `mode="all_or_nothing"`:
 - Stage file changes to temp files.
-- If any write-phase item fails, abort batch write-phase and do not publish staged files.
+- If any write-phase item is not applied (`created`/`updated`), including `duplicate`, abort batch write-phase and do not publish staged files.
 - Mark all items as failed/aborted with explicit codes.
 
 For `mode="best_effort"`:
@@ -165,7 +167,6 @@ Return stable machine-readable codes:
 
 - `invalid_input`
 - `invalid_uuid`
-- `duplicate_source_url`
 - `path_collision`
 - `stale_write_conflict`
 - `doc_not_found`
@@ -175,6 +176,8 @@ Return stable machine-readable codes:
 - `internal_error`
 
 Human-readable `message` accompanies each code.
+
+`duplicate_source_url` is represented as a write outcome (`status="duplicate"`) in per-item `result_json`, not as a transport-level failure code.
 
 ## Concurrency and Safety
 

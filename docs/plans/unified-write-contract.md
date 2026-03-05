@@ -110,8 +110,9 @@ Authority rule:
 
 - Enums must be validated (`note_type`, `access_scope`, `status`).
 - Defaults applied when absent.
+- Before LCMA metadata support ships, these fields may be rejected as `invalid_input`/`unsupported_feature`.
 
-## Canonical Success Envelope
+## Canonical Write Outcome Envelope
 
 `lithos_write` and batch per-item outcomes must use:
 
@@ -131,6 +132,12 @@ Notes:
 - `warnings` is always present (possibly empty).
 - Typical warning: unresolved `derived_from_ids` references.
 - `duplicate` is specific to source URL dedup policy.
+- `duplicate` is not an internal server error; it is a first-class write outcome.
+
+Batch-mode policy:
+
+- `best_effort`: `duplicate` is recorded per-item and processing continues.
+- `all_or_nothing`: any non-apply outcome (including `duplicate`) aborts publish of staged writes.
 
 ## Error Model
 
@@ -140,11 +147,15 @@ Core codes:
 
 - `invalid_input`
 - `invalid_uuid`
-- `duplicate_source_url`
+- `unsupported_feature`
 - `path_collision`
 - `stale_write_conflict`
 - `doc_not_found`
 - `internal_error`
+
+Notes:
+
+- Source URL dedup collisions are represented as write outcome `status="duplicate"` in the canonical envelope.
 
 Batch-only projection/workflow codes may add:
 
@@ -159,6 +170,17 @@ Batch-only projection/workflow codes may add:
 3. Same status envelope for per-item write results.
 4. Batch status/reporting adds workflow state only; it does not redefine write semantics.
 
+## MCP Boundary Semantics
+
+Omit-vs-clear behavior is normative at the MCP JSON boundary:
+
+- field omitted in request JSON -> preserve existing value on update
+- field present with `null` -> clear (for fields that support clear)
+
+Implementation requirement:
+
+- Tool layer and manager layer must have conformance tests proving omitted and `null` are distinguishable for `source_url`, `expires_at`, and `derived_from_ids`.
+
 ## Index and Migration Rules
 
 Frontmatter-only additions usually require no content migration.
@@ -172,3 +194,7 @@ If search backend schema shape changes (e.g., Tantivy fields), startup must:
 ## Observability Requirement
 
 Write and batch paths are instrumented through OTEL foundation (`telemetry.py`, `traced`, `lithos_metrics`), not separate telemetry systems.
+
+## API Ergonomics Follow-up
+
+The pre-1.0 interface may expose many optional write parameters. A follow-up API cleanup can introduce grouped objects (for example `provenance`, `freshness`, `lcma`) without changing on-disk semantics defined here.
