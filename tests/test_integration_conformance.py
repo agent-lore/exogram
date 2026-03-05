@@ -7,6 +7,7 @@ from typing import Any
 
 import frontmatter
 import pytest
+from fastmcp.exceptions import ToolError
 
 from lithos.config import LithosConfig
 from lithos.server import LithosServer, _FileChangeHandler
@@ -23,10 +24,7 @@ async def _call_tool(server: LithosServer, name: str, arguments: dict[str, Any])
         if isinstance(payload, dict):
             return payload
 
-    if hasattr(result, "content"):  # MCP CallToolResult
-        content = getattr(result, "content", [])
-    else:
-        content = result
+    content = getattr(result, "content", []) if hasattr(result, "content") else result
 
     if isinstance(content, list) and content:
         text = getattr(content[0], "text", None)
@@ -974,13 +972,13 @@ class TestAgentAndCoordinationMCPTools:
             },
         )
 
-        with pytest.raises(Exception):
+        with pytest.raises(ToolError, match="Invalid isoformat string"):
             await _call_tool(server, "lithos_list", {"since": "not-a-date"})
 
-        with pytest.raises(Exception):
+        with pytest.raises(ToolError, match="Invalid isoformat string"):
             await _call_tool(server, "lithos_agent_list", {"active_since": "still-not-a-date"})
 
-        with pytest.raises(Exception):
+        with pytest.raises(ToolError, match="Invalid isoformat string"):
             await _call_tool(
                 server,
                 "lithos_finding_list",

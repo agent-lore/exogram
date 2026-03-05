@@ -2,8 +2,8 @@
 
 import asyncio
 
-from click.testing import CliRunner
 import pytest
+from click.testing import CliRunner
 
 from lithos.cli import cli
 from lithos.config import LithosConfig, StorageConfig, set_config
