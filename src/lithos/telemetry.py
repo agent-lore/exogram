@@ -400,3 +400,12 @@ def _reset_for_testing() -> None:
     _initialized = False
     _tracer_provider = None
     _meter_provider = None
+
+    # Reset global OTEL providers so set_tracer_provider() can be called again
+    if _HAS_OTEL:
+        from opentelemetry.util._once import Once
+
+        trace._TRACER_PROVIDER_SET_ONCE = Once()
+        trace._TRACER_PROVIDER = None
+        metrics._METER_PROVIDER_SET_ONCE = Once()
+        metrics._METER_PROVIDER = None
