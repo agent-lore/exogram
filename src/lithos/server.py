@@ -15,6 +15,7 @@ from lithos.coordination import CoordinationService
 from lithos.graph import KnowledgeGraph
 from lithos.knowledge import KnowledgeManager
 from lithos.search import SearchEngine
+from lithos.telemetry import register_active_claims_observer
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,9 @@ class LithosServer:
         self.search = SearchEngine(self._config)
         self.graph = KnowledgeGraph(self._config)
         self.coordination = CoordinationService(self._config)
+
+        # Cached active claims count for the OTEL observable gauge callback
+        self._cached_active_claims: int = 0
 
         # File watcher
         self._observer: Observer | None = None
@@ -64,6 +68,9 @@ class LithosServer:
 
         # Initialize coordination database
         await self.coordination.initialize()
+
+        # Register active claims gauge observer
+        register_active_claims_observer(lambda: self._cached_active_claims)
 
         # Load or build indices
         if self.config.index.rebuild_on_start:
@@ -762,6 +769,9 @@ class LithosServer:
 
             # Get coordination stats
             coord_stats = await self.coordination.get_stats()
+
+            # Update cached active claims for OTEL gauge
+            self._cached_active_claims = coord_stats.get("open_claims", 0)
 
             # Get tag count
             tags = await self.knowledge.get_all_tags()
