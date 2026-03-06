@@ -7,7 +7,10 @@ This checklist defines the preferred execution order across the active plans:
 - `research-cache-plan.md`
 - `otel-plan.md`
 - `bulk-write-v3.md`
+- `reconcile-plan.md`
 - `lcma-design.md`
+- `event-system-plan.md`
+- `cli-extension-plan.md`
 
 Normative references:
 
@@ -101,8 +104,7 @@ Exit criteria:
 - [ ] Extend `lithos_write` with `ttl_hours`/`expires_at` per unified contract
 - [ ] Add `lithos_cache_lookup`
 - [ ] Add freshness fields (`updated_at`, `is_stale`) to search/semantic responses
-- [ ] Align any search schema changes with rebuild framework
-- [ ] If feasible, batch Phase 2 + Phase 4 Tantivy schema changes into one rebuild window
+- [ ] Align search schema changes with rebuild framework using the single batched Tantivy schema jump decided in `target-search-schema.md`
 
 Dependencies:
 
@@ -141,6 +143,7 @@ Exit criteria:
 
 ## Phase 6 - Reconcile/Repair Tooling
 
+- [ ] Complete dedicated implementation plan (`reconcile-plan.md`) review before coding starts
 - [ ] Implement `lithos_reconcile` core scopes (`indices`/`graph`/`all`)
 - [ ] Implement deterministic no-op behavior for `provenance_projection` when projection store is not enabled
 - [ ] Add dry-run mode and repair reporting
@@ -188,6 +191,46 @@ Exit criteria:
 
 - LCMA features remain additive and consistent with canonical write contract
 - On-disk compatibility preserved throughout rollout
+
+---
+
+## Phase 8 - API Ergonomics Cleanup
+
+- [ ] Replace the flat `lithos_write` option surface with grouped request objects (`provenance`, `freshness`, `lcma`) at the MCP boundary
+- [ ] Preserve the canonical on-disk semantics and outcome envelope from `unified-write-contract.md`
+- [ ] Add compatibility notes in `docs/SPECIFICATION.md` for the cleaned-up pre-1.0 interface
+- [ ] Extend single-write and batch conformance coverage to grouped input objects
+
+Dependencies:
+
+- Phase 7 MVP 1 complete (LCMA write fields are present and stable enough to group)
+
+Exit criteria:
+
+- Single and batch write APIs are materially easier to use without changing manager-layer semantics
+- Grouped request objects have conformance tests proving parity with canonical field semantics
+
+---
+
+## Phase 9 - Deferred Integration and UX Tracks
+
+### Event System
+
+- [ ] Revisit `event-system-plan.md` after LCMA rollout and wire event emission onto the stabilized write/task lifecycle
+- [ ] Prefer emitting from canonical write/task success paths to avoid duplicate event logic
+
+### CLI Extension
+
+- [ ] Revisit `cli-extension-plan.md` after the write and retrieval surfaces stabilize
+- [ ] Prioritize CLI phases 1-3 first (JSON output, read/list, CRUD), then graph/coordination/polish
+
+Dependencies:
+
+- Phases 0 through 8 complete
+
+Exit criteria:
+
+- Deferred operator and integration surfaces are built on top of the stabilized core contracts
 
 ---
 

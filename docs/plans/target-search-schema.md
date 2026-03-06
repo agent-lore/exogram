@@ -53,5 +53,5 @@ When any target field addition/removal requires backend schema changes:
 
 Batching rule:
 
-- if multiple adjacent features require schema-breaking changes, prefer one combined schema jump and one rebuild window.
-
+- use one combined schema jump for the Phase 2 (`source_url`) and Phase 4 (`updated_at`, `expires_at`) Tantivy changes, followed by one rebuild window.
+- if implementation constraints force an earlier partial rollout, document the reason in `implementation-checklist.md` before coding starts rather than silently taking a second rebuild.
