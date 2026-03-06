@@ -235,12 +235,8 @@ class TestMCPToolContracts:
         await _call_tool(server, "lithos_delete", {"id": doc_id})
 
         # Knowledge layer: read should fail.
-        try:
+        with pytest.raises(ToolError):
             await _call_tool(server, "lithos_read", {"id": doc_id})
-            read_failed = False
-        except Exception:
-            read_failed = True
-        assert read_failed, "lithos_read should fail after delete"
 
         # Full-text search: absent.
         ft_payload = await _call_tool(
@@ -1098,14 +1094,7 @@ class TestSearchAndListFilters:
         )
         result_ids = [r["id"] for r in filtered["results"]]
         assert beta_id in result_ids
-        # Alpha should be excluded by tag filter
-        assert all(r["id"] != beta_id or True for r in filtered["results"])
-        for r in filtered["results"]:
-            if r["id"] != beta_id:
-                # If alpha somehow appears, the filter is broken
-                pass
-        # More direct: only beta should match
-        assert beta_id in result_ids
+        assert all(r["id"] == beta_id for r in filtered["results"])
 
     @pytest.mark.asyncio
     async def test_search_filters_by_author(self, server: LithosServer):
@@ -1549,13 +1538,13 @@ class TestErrorAndBoundaryConditions:
     async def test_read_nonexistent_id_raises(self, server: LithosServer):
         """lithos_read with a non-existent UUID raises an error."""
         fake_id = "00000000-0000-0000-0000-000000000000"
-        with pytest.raises((ToolError, Exception)):
+        with pytest.raises(ToolError):
             await _call_tool(server, "lithos_read", {"id": fake_id})
 
     @pytest.mark.asyncio
     async def test_read_nonexistent_path_raises(self, server: LithosServer):
         """lithos_read with a non-existent path raises an error."""
-        with pytest.raises((ToolError, Exception)):
+        with pytest.raises(ToolError):
             await _call_tool(server, "lithos_read", {"path": "no-such/file.md"})
 
     @pytest.mark.asyncio

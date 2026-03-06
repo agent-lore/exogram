@@ -1,6 +1,7 @@
 """CLI contract tests for stable output shape."""
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
@@ -164,6 +165,12 @@ class TestCLIContracts:
                 agent="cli-agent-a",
                 ttl_minutes=10,
             )
+            completed_task_id = await coordination.create_task(
+                title="CLI Completed Task",
+                agent="cli-agent-a",
+                description="Task completed to validate --all path.",
+            )
+            await coordination.complete_task(completed_task_id, "cli-agent-a")
 
         asyncio.run(_seed())
 
@@ -178,6 +185,11 @@ class TestCLIContracts:
         assert "Tasks (" in tasks.output
         assert "[OPEN] CLI Inspect Task" in tasks.output
         assert "claim:" in tasks.output
+        assert "CLI Completed Task" not in tasks.output
+
+        all_tasks = runner.invoke(cli, ["--data-dir", str(temp_dir), "inspect", "tasks", "--all"])
+        assert all_tasks.exit_code == 0, all_tasks.output
+        assert "[COMPLETED] CLI Completed Task" in all_tasks.output
 
     def test_inspect_health_exit_code_paths(self, temp_dir, monkeypatch):
         config = LithosConfig(storage=StorageConfig(data_dir=temp_dir))
@@ -207,3 +219,97 @@ class TestCLIContracts:
         assert unhealthy.exit_code == 1, unhealthy.output
         assert "Backend health" in unhealthy.output
         assert "chroma: unavailable: forced health failure" in unhealthy.output
+
+    def test_serve_stdio_and_sse_paths(self, temp_dir, monkeypatch):
+        config = LithosConfig(storage=StorageConfig(data_dir=temp_dir))
+        config.ensure_directories()
+        set_config(config)
+
+        calls = {"watch_started": 0, "watch_stopped": 0, "stdio": 0, "sse": 0}
+
+        class _DummyMCP:
+            async def run_stdio_async(self, show_banner=False):
+                calls["stdio"] += 1
+
+            async def run_http_async(self, **kwargs):
+                assert kwargs["transport"] == "sse"
+                assert kwargs["host"] == "127.0.0.1"
+                assert kwargs["port"] == 8766
+                assert kwargs["path"] == "/sse"
+                calls["sse"] += 1
+
+        class _DummyServer:
+            def __init__(self):
+                self.mcp = _DummyMCP()
+
+            async def initialize(self):
+                return None
+
+            def start_file_watcher(self):
+                calls["watch_started"] += 1
+
+            def stop_file_watcher(self):
+                calls["watch_stopped"] += 1
+
+        monkeypatch.setattr("lithos.server.create_server", lambda _cfg: _DummyServer())
+
+        runner = CliRunner()
+        stdio = runner.invoke(cli, ["--data-dir", str(temp_dir), "serve", "--no-watch"])
+        assert stdio.exit_code == 0, stdio.output
+        assert "Starting MCP server (stdio transport)..." in stdio.output
+
+        sse = runner.invoke(
+            cli,
+            [
+                "--data-dir",
+                str(temp_dir),
+                "serve",
+                "--transport",
+                "sse",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "8766",
+                "--watch",
+            ],
+        )
+        assert sse.exit_code == 0, sse.output
+        assert "Listening on http://127.0.0.1:8766" in sse.output
+
+        assert calls["stdio"] == 1
+        assert calls["sse"] == 1
+        assert calls["watch_started"] == 1
+        assert calls["watch_stopped"] == 0
+
+    def test_serve_keyboard_interrupt_stops_watcher(self, temp_dir, monkeypatch):
+        config = LithosConfig(storage=StorageConfig(data_dir=temp_dir))
+        config.ensure_directories()
+        set_config(config)
+
+        calls = {"stop": 0}
+
+        class _DummyServer:
+            mcp = SimpleNamespace()
+
+            async def initialize(self):
+                return None
+
+            def start_file_watcher(self):
+                return None
+
+            def stop_file_watcher(self):
+                calls["stop"] += 1
+
+        monkeypatch.setattr("lithos.server.create_server", lambda _cfg: _DummyServer())
+
+        def _raise_keyboard_interrupt(coro):
+            coro.close()
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr("lithos.cli.asyncio.run", _raise_keyboard_interrupt)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--data-dir", str(temp_dir), "serve", "--watch"])
+        assert result.exit_code == 0, result.output
+        assert "Shutting down..." in result.output
+        assert calls["stop"] == 1
