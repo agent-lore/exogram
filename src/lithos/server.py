@@ -1,6 +1,7 @@
 """Lithos MCP Server - FastMCP server exposing all tools."""
 
 import asyncio
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,8 @@ from lithos.coordination import CoordinationService
 from lithos.graph import KnowledgeGraph
 from lithos.knowledge import KnowledgeManager
 from lithos.search import SearchEngine
+
+logger = logging.getLogger(__name__)
 
 
 class LithosServer:
@@ -83,7 +86,7 @@ class LithosServer:
                 self.search.index_document(doc)
                 self.graph.add_document(doc)
             except Exception as e:
-                print(f"Error indexing {file_path}: {e}")
+                logger.error("Error indexing %s: %s", file_path, e)
 
         self.graph.save_cache()
 
@@ -139,7 +142,7 @@ class LithosServer:
                     self.graph.add_document(doc)
                     self.graph.save_cache()
             except Exception as e:
-                print(f"Error handling file change {path}: {e}")
+                logger.error("Error handling file change %s: %s", path, e)
 
     def _register_tools(self) -> None:
         """Register all MCP tools."""
@@ -807,7 +810,7 @@ class _FileChangeHandler(FileSystemEventHandler):
         try:
             exception = future.exception()
             if exception:
-                print(f"Error processing file update: {exception}")
+                logger.error("Error processing file update: %s", exception)
         except Exception:
             pass
 

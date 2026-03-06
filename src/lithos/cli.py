@@ -72,6 +72,7 @@ def serve(
 ) -> None:
     """Start the Lithos MCP server."""
     from lithos.server import create_server
+    from lithos.telemetry import setup_telemetry, shutdown_telemetry
 
     config: LithosConfig = ctx.obj["config"]
     server = create_server(config)
@@ -103,10 +104,13 @@ def serve(
             )
 
     try:
+        setup_telemetry(config)
         asyncio.run(run_server())
     except KeyboardInterrupt:
         click.echo("\nShutting down...")
         server.stop_file_watcher()
+    finally:
+        shutdown_telemetry()
 
 
 @cli.command()
