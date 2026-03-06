@@ -1,0 +1,126 @@
+# Internal Event Bus
+
+Contract note: system-level rollout and compatibility constraints are governed by `final-architecture-guardrails.md`. Write-path semantics referenced here are governed by `unified-write-contract.md`.
+
+## Goal
+
+Add an internal event bus that emits on all write/task/delete/finding success paths. The bus is internal infrastructure — no new MCP tools, no SSE endpoint, no webhooks. Later phases and the delivery plan (`event-delivery-plan.md`) consume from this bus.
+
+The bus exists so that:
+
+- later phases can react to state changes without polling or ad-hoc callbacks
+- bulk writes (Phase 5) can emit batch status events internally
+- LCMA (Phase 7) can trigger consolidation on `lithos_task_complete`
+- the delivery surface (Phase 6.5) has a stable emission layer to build on
+
+## Event Types
+
+```
+note.created      note.updated      note.deleted
+task.created      task.claimed      task.released      task.completed
+finding.posted
+agent.registered
+```
+
+Each event carries:
+
+```python
+@dataclass
+class LithosEvent:
+    id: str                    # uuid
+    type: str                  # e.g. "note.created"
+    timestamp: datetime
+    agent: str | None          # who triggered it
+    payload: dict              # type-specific data
+    tags: list[str]            # from the affected document/task
+```
+
+## Design
+
+### New file: `src/lithos/events.py`
+
+#### `EventBus` class
+
+- `async emit(event)` — fans out to all subscriber queues
+- `subscribe(filter)` → returns an `asyncio.Queue` for internal consumers
+- `unsubscribe(queue)` — cleanup
+- In-memory ring buffer of last N events (configurable via `EventsConfig.event_buffer_size`)
+
+The bus is purely in-memory. No persistence, no HTTP, no SQLite. Subscribers are internal Python consumers (other Lithos subsystems), not external agents. External delivery is handled by `event-delivery-plan.md`.
+
+#### Subscriber filtering
+
+`subscribe()` accepts an optional filter (event types and/or tags). The bus only enqueues events that match the filter into that subscriber's queue. This keeps consumers from having to filter themselves.
+
+### Config: `EventsConfig` in `config.py`
+
+```python
+class EventsConfig(BaseModel):
+    """Event bus configuration."""
+
+    enabled: bool = True
+    event_buffer_size: int = 500      # in-memory ring buffer size
+```
+
+Only bus-relevant config. SSE and webhook config are added later by `event-delivery-plan.md`.
+
+Add to `LithosConfig`:
+
+```python
+class LithosConfig(BaseSettings):
+    # ... existing fields ...
+    events: EventsConfig = Field(default_factory=EventsConfig)
+```
+
+### Emission points in `server.py`
+
+After each successful operation, emit an event. Events are emitted **after** the operation succeeds (DB commit, file write) but **before** returning to the caller.
+
+| Tool | Event type | Payload |
+| ---- | ---------- | ------- |
+| `lithos_write` (create) | `note.created` | `id`, `title`, `path` |
+| `lithos_write` (update) | `note.updated` | `id`, `title`, `path` |
+| `lithos_delete` | `note.deleted` | `id`, `path` |
+| `lithos_task_create` | `task.created` | `task_id`, `title` |
+| `lithos_task_claim` | `task.claimed` | `task_id`, `agent`, `aspect` |
+| `lithos_task_release` | `task.released` | `task_id`, `agent`, `aspect` |
+| `lithos_task_complete` | `task.completed` | `task_id`, `agent` |
+| `lithos_finding_post` | `finding.posted` | `finding_id`, `task_id`, `agent` |
+| `lithos_agent_register` | `agent.registered` | `agent_id`, `name` |
+| `handle_file_change` (watcher) | `note.updated` / `note.deleted` | `path` |
+
+Example emission in `lithos_write`:
+
+```python
+await self.event_bus.emit(LithosEvent(
+    type="note.created" if not id else "note.updated",
+    agent=agent,
+    payload={"id": doc.id, "title": doc.title, "path": str(doc.path)},
+    tags=doc.metadata.tags,
+))
+```
+
+### Lifecycle
+
+`EventBus` is created in `LithosServer.__init__` and stored as `self.event_bus`. No explicit shutdown is needed at this stage (in-memory only, no background workers).
+
+If `EventsConfig.enabled` is `False`, the bus is still created but `emit()` is a no-op (same pattern as OTEL no-op mode).
+
+## Files
+
+| File | Change |
+| ---- | ------ |
+| `src/lithos/events.py` | New: `LithosEvent`, `EventBus` with ring buffer and subscriber management |
+| `src/lithos/config.py` | Add `EventsConfig` (bus fields only) to `LithosConfig` |
+| `src/lithos/server.py` | Create `EventBus` in `__init__`, add `emit()` calls in all tool handlers and file watcher |
+| `tests/test_event_bus.py` | New: emit/subscribe/filter/ring-buffer/no-op-when-disabled tests |
+
+## Out of Scope
+
+The following are covered by `event-delivery-plan.md` (Phase 6.5):
+
+- SSE endpoint (`GET /events`)
+- Webhook registry and dispatcher
+- Webhook MCP tools (`lithos_webhook_register`, etc.)
+- HMAC signing, delivery retries, SQLite delivery log
+- `max_sse_clients`, `webhook_timeout_seconds`, `webhook_max_retries` config

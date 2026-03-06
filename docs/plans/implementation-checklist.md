@@ -8,8 +8,9 @@ This checklist defines the preferred execution order across the active plans:
 - `otel-plan.md`
 - `bulk-write-v3.md`
 - `reconcile-plan.md`
+- `event-bus-plan.md`
+- `event-delivery-plan.md`
 - `lcma-design.md`
-- `event-system-plan.md`
 - `cli-extension-plan.md`
 
 Normative references:
@@ -63,6 +64,11 @@ Exit criteria:
 - [ ] Add startup duplicate audit and deterministic logging
 - [ ] Implement index schema mismatch recreate + full rebuild path
 - [ ] Return `source_url` in read/search/semantic/list responses
+- [ ] Add `events.py` with `EventBus` class, `LithosEvent` dataclass, and in-memory ring buffer
+- [ ] Add `EventsConfig` to `config.py` (enabled flag, buffer size)
+- [ ] Wire `EventBus` into `LithosServer` lifecycle
+- [ ] Emit events from write/delete/task/finding/agent-register success paths in `server.py`
+- [ ] Emit events from file watcher `handle_file_change`
 
 Dependencies:
 
@@ -74,6 +80,7 @@ Exit criteria:
 - Duplicate URL writes are consistently blocked by manager invariants
 - Existing on-disk notes remain readable after upgrade
 - Rebuild path succeeds automatically on schema mismatch
+- Internal event bus emits on all write/task success paths (no delivery surface yet)
 
 ---
 
@@ -159,6 +166,26 @@ Exit criteria:
 
 ---
 
+## Phase 6.5 - Event Delivery Surface
+
+- [ ] Add SSE endpoint (`GET /events`) with type/tag filtering and replay-from-ID
+- [ ] Add webhook registry tables to `coordination.db` (`webhooks`, `webhook_deliveries`)
+- [ ] Implement webhook dispatcher with HMAC signing, retries, and delivery logging
+- [ ] Add MCP tools: `lithos_webhook_register`, `lithos_webhook_list`, `lithos_webhook_delete`, `lithos_webhook_deliveries`
+- [ ] Add event delivery tests (SSE integration, webhook delivery)
+
+Dependencies:
+
+- Phase 2 internal event bus complete
+- Phase 6 recommended (reconcile may emit events)
+
+Exit criteria:
+
+- Agents can subscribe to real-time events via SSE or webhooks
+- Webhook delivery survives server restart via SQLite-backed queue
+
+---
+
 ## Phase 7 - LCMA Rollout (MVPs in Order)
 
 ### MVP 1
@@ -185,7 +212,7 @@ Exit criteria:
 
 Dependencies:
 
-- Phases 0 through 6 complete
+- Phases 0 through 6.5 complete
 
 Exit criteria:
 
@@ -212,14 +239,7 @@ Exit criteria:
 
 ---
 
-## Phase 9 - Deferred Integration and UX Tracks
-
-### Event System
-
-- [ ] Revisit `event-system-plan.md` after LCMA rollout and wire event emission onto the stabilized write/task lifecycle
-- [ ] Prefer emitting from canonical write/task success paths to avoid duplicate event logic
-
-### CLI Extension
+## Phase 9 - Deferred Integration: CLI Extension
 
 - [ ] Revisit `cli-extension-plan.md` after the write and retrieval surfaces stabilize
 - [ ] Prioritize CLI phases 1-3 first (JSON output, read/list, CRUD), then graph/coordination/polish
@@ -230,7 +250,7 @@ Dependencies:
 
 Exit criteria:
 
-- Deferred operator and integration surfaces are built on top of the stabilized core contracts
+- CLI surfaces are built on top of the stabilized core contracts
 
 ---
 
