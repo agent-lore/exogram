@@ -47,10 +47,8 @@ Natural fit for Phase 9 (`cli-extension-plan.md`). Not a prerequisite for any ac
 
 ---
 
-## 5. `inspect_doc` CLI Bug (`cli.py:509`)
+## 5. Small Runtime Fixes
 
-This is a code bug, not a planning gap.
+Small standalone defects should be fixed directly when discovered rather than queued behind roadmap phases.
 
-`cli.py` line 509 references `doc.metadata.created` and `doc.metadata.updated`, but the correct attribute names on `KnowledgeMetadata` are `created_at` and `updated_at`. This produces an `AttributeError` at runtime when `lithos inspect doc` is called.
-
-Fix is a two-line change in `cli.py`. Tracked here because it is not covered by any active plan's scope.
+Recent example: the `inspect_doc` timestamp attribute mismatch in `cli.py` was corrected directly instead of being assigned to a later CLI phase.

@@ -213,14 +213,14 @@ The file watcher already emits `note.updated` via the event bus (from `event-bus
 - event IDs are stable and unique and must be included in webhook payloads so consumers can dedupe
 - consumers must tolerate duplicates and occasional missed replay across full server restarts
 
-## Resolved Questions
+## Phase 6.5 Decisions
 
-| Question | Options |
-| -------- | ------- |
-| FastMCP route mounting | `custom_route()` API vs separate Starlette/FastAPI app on second port |
-| Event persistence | Ring buffer only (lost on restart) vs append to SQLite |
+The following decisions are normative for implementation:
 
-For a local-first tool: same auth boundary as MCP, `custom_route()` mounting, SQLite-backed outbox, ring buffer for SSE replay.
+- FastMCP route mounting uses `custom_route()` on the existing app, not a separate Starlette/FastAPI service on another port.
+- SSE replay remains ring-buffer based and may be lost across full server restarts.
+- Webhook delivery persistence uses a SQLite-backed outbox in `coordination.db`.
+- SSE inherits the same auth boundary as MCP when auth exists.
 
 ## Files
 

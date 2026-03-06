@@ -55,7 +55,7 @@ Exit criteria:
 
 ---
 
-## Phase 2 - Source URL Dedup + Provenance Surface
+## Phase 2a - Source URL Dedup + Provenance Surface
 
 - [ ] Add `source_url` metadata field and normalization
 - [ ] Add manager-owned dedup map and write-time invariants
@@ -64,11 +64,6 @@ Exit criteria:
 - [ ] Add startup duplicate audit and deterministic logging
 - [ ] Implement index schema mismatch recreate + full rebuild path
 - [ ] Return `source_url` in read/search/semantic/list responses
-- [ ] Add `events.py` with `EventBus` class, `LithosEvent` dataclass, and in-memory ring buffer
-- [ ] Add `EventsConfig` to `config.py` (enabled flag, buffer size)
-- [ ] Wire `EventBus` into `LithosServer` lifecycle
-- [ ] Emit events from write/delete/task/finding/agent-register success paths in `server.py`
-- [ ] Emit events from file watcher `handle_file_change`
 
 Dependencies:
 
@@ -80,6 +75,24 @@ Exit criteria:
 - Duplicate URL writes are consistently blocked by manager invariants
 - Existing on-disk notes remain readable after upgrade
 - Rebuild path succeeds automatically on schema mismatch
+
+---
+
+## Phase 2b - Internal Event Bus
+
+- [ ] Add `events.py` with `EventBus` class, `LithosEvent` dataclass, and in-memory ring buffer
+- [ ] Add `EventsConfig` to `config.py` (enabled flag, buffer size)
+- [ ] Wire `EventBus` into `LithosServer` lifecycle
+- [ ] Emit events from write/delete/task/finding/agent-register success paths in `server.py`
+- [ ] Emit events from file watcher `handle_file_change`
+
+Dependencies:
+
+- Phase 0 complete
+- Phase 1 recommended (for event-path observability)
+
+Exit criteria:
+
 - Internal event bus emits on all write/task success paths (no delivery surface yet)
 
 ---
@@ -96,7 +109,7 @@ Exit criteria:
 Dependencies:
 
 - Phase 0 complete
-- Phase 2 recommended (shared provenance fields already surfaced)
+- Phase 2a recommended (shared provenance fields already surfaced)
 
 Exit criteria:
 
@@ -116,7 +129,7 @@ Exit criteria:
 Dependencies:
 
 - Phase 0 complete
-- Phase 2/3 recommended (provenance + dedup stability improves cache quality)
+- Phase 2a/3 recommended (provenance + dedup stability improves cache quality)
 
 Exit criteria:
 
@@ -139,7 +152,8 @@ Dependencies:
 
 - Phase 0 complete
 - Phase 1 complete
-- Phase 2 and 3 complete (shared invariants are reused by batch)
+- Phase 2a and 3 complete (shared invariants are reused by batch)
+- Phase 2b recommended (batch lifecycle events can emit immediately)
 - Phase 4 recommended (freshness fields in unified payload)
 
 Exit criteria:
@@ -159,7 +173,7 @@ Exit criteria:
 
 Dependencies:
 
-- Phases 2 through 5 complete
+- Phases 2a through 5 complete
 
 Exit criteria:
 
@@ -178,7 +192,7 @@ Exit criteria:
 
 Dependencies:
 
-- Phase 2 internal event bus complete
+- Phase 2b internal event bus complete
 - Phase 6 recommended (reconcile may emit events)
 
 Exit criteria:
