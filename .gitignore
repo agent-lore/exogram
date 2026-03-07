@@ -76,3 +76,7 @@ Thumbs.db
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# Ralph
+scripts/ralph/ralph.sh
+scripts/ralph/CLAUDE.md
