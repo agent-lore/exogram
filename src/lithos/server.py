@@ -14,7 +14,7 @@ from watchdog.observers import Observer
 from lithos.config import LithosConfig, get_config, set_config
 from lithos.coordination import CoordinationService
 from lithos.graph import KnowledgeGraph
-from lithos.knowledge import KnowledgeManager
+from lithos.knowledge import _UNSET, KnowledgeDocument, KnowledgeManager
 from lithos.search import SearchEngine
 from lithos.telemetry import get_tracer, register_active_claims_observer
 
@@ -180,7 +180,8 @@ class LithosServer:
             path: str | None = None,
             id: str | None = None,
             source_task: str | None = None,
-        ) -> dict[str, str]:
+            source_url: str | None = None,
+        ) -> dict[str, Any]:
             """Create or update a knowledge file.
 
             Args:
@@ -192,9 +193,10 @@ class LithosServer:
                 path: Subdirectory path (e.g., "procedures")
                 id: UUID to update existing; omit to create new
                 source_task: Task ID this knowledge came from
+                source_url: URL provenance for this knowledge
 
             Returns:
-                Dict with id and path of the document
+                Dict with status envelope: created/updated/duplicate
             """
             logger.info("lithos_write agent=%s title=%r update=%s", agent, title, id is not None)
             tracer = get_tracer()
@@ -205,19 +207,23 @@ class LithosServer:
 
                 await self.coordination.ensure_agent_known(agent)
 
+                warnings: list[str] = []
+
                 if id:
-                    # Update existing
-                    doc = await self.knowledge.update(
+                    # Update existing — pass source_url with _UNSET default
+                    url_arg = source_url if source_url is not None else _UNSET
+                    result = await self.knowledge.update(
                         id=id,
                         agent=agent,
                         title=title,
                         content=content,
                         tags=tags,
                         confidence=confidence,
+                        source_url=url_arg,
                     )
                 else:
                     # Create new — default confidence to 1.0 when not specified
-                    doc = await self.knowledge.create(
+                    result = await self.knowledge.create(
                         title=title,
                         content=content,
                         agent=agent,
@@ -225,7 +231,31 @@ class LithosServer:
                         confidence=confidence if confidence is not None else 1.0,
                         path=path,
                         source=source_task,
+                        source_url=source_url,
                     )
+
+                # Handle dict results (duplicate or invalid_input)
+                if isinstance(result, dict):
+                    status = result.get("status", "error")
+                    if status == "duplicate":
+                        span.set_attribute("lithos.write_status", "duplicate")
+                        return {
+                            "status": "duplicate",
+                            "duplicate_of": result["duplicate_of"],
+                            "message": result["message"],
+                            "warnings": warnings,
+                        }
+                    elif status == "invalid_input":
+                        span.set_attribute("lithos.write_status", "invalid_input")
+                        return {
+                            "status": "error",
+                            "code": "invalid_input",
+                            "message": result["message"],
+                            "warnings": warnings,
+                        }
+
+                doc: KnowledgeDocument = result
+                status_label = "updated" if id else "created"
 
                 # Update indices
                 self.search.index_document(doc)
@@ -233,8 +263,14 @@ class LithosServer:
                 self.graph.save_cache()
 
                 span.set_attribute("lithos.doc_id", doc.id)
-                logger.info("lithos_write completed doc_id=%s", doc.id)
-                return {"id": doc.id, "path": str(doc.path)}
+                span.set_attribute("lithos.write_status", status_label)
+                logger.info("lithos_write completed doc_id=%s status=%s", doc.id, status_label)
+                return {
+                    "status": status_label,
+                    "id": doc.id,
+                    "path": str(doc.path),
+                    "warnings": warnings,
+                }
 
         @self.mcp.tool()
         async def lithos_read(
