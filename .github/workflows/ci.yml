@@ -98,7 +98,7 @@ jobs:
       - name: Build and start Lithos
         run: |
           cd docker
-          docker compose up -d --build
+          LITHOS_OTEL_ENABLED=false docker compose up -d --build
 
       - name: Wait for server to be healthy
         run: |
