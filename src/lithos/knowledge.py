@@ -9,6 +9,7 @@ from pathlib import Path
 import frontmatter
 
 from lithos.config import get_config
+from lithos.telemetry import lithos_metrics, traced
 
 # Wiki-link pattern: [[target]] or [[target|display]]
 WIKI_LINK_PATTERN = re.compile(r"\[\[([^\]\[|]*[a-zA-Z][^\]\[|]*)(?:\|([^\]]+))?\]\]")
@@ -285,6 +286,7 @@ class KnowledgeManager:
 
         return full_path.relative_to(base_path), full_path
 
+    @traced("lithos.knowledge.create")
     async def create(
         self,
         title: str,
@@ -296,6 +298,7 @@ class KnowledgeManager:
         source: str | None = None,
     ) -> KnowledgeDocument:
         """Create a new knowledge document."""
+        lithos_metrics.knowledge_ops.add(1, {"op": "create"})
         doc_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc)
 
@@ -338,6 +341,7 @@ class KnowledgeManager:
 
         return doc
 
+    @traced("lithos.knowledge.read")
     async def read(
         self,
         id: str | None = None,
@@ -349,6 +353,7 @@ class KnowledgeManager:
         Returns:
             Tuple of (document, was_truncated)
         """
+        lithos_metrics.knowledge_ops.add(1, {"op": "read"})
         if id:
             if id not in self._id_to_path:
                 raise FileNotFoundError(f"Document not found: {id}")
@@ -391,6 +396,7 @@ class KnowledgeManager:
 
         return doc, truncated
 
+    @traced("lithos.knowledge.update")
     async def update(
         self,
         id: str,
@@ -401,6 +407,7 @@ class KnowledgeManager:
         confidence: float | None = None,
     ) -> KnowledgeDocument:
         """Update an existing document."""
+        lithos_metrics.knowledge_ops.add(1, {"op": "update"})
         doc, _ = await self.read(id=id)
         old_slug = slugify(doc.metadata.title)
 
@@ -434,8 +441,10 @@ class KnowledgeManager:
 
         return doc
 
+    @traced("lithos.knowledge.delete")
     async def delete(self, id: str) -> bool:
         """Delete a document."""
+        lithos_metrics.knowledge_ops.add(1, {"op": "delete"})
         if id not in self._id_to_path:
             return False
 

@@ -19,7 +19,7 @@ ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Install the package (production only, no dev deps for smaller image)
-RUN uv pip install -e .
+RUN uv pip install -e ".[otel]"
 
 # Stage 2: Runtime image
 FROM python:3.11-slim AS runtime

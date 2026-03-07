@@ -14,6 +14,8 @@ services:
       - LITHOS_DATA_DIR=/data
       - LITHOS_HOST=0.0.0.0
       - LITHOS_PORT=8765
+      - LITHOS_OTEL_ENABLED=${LITHOS_OTEL_ENABLED:-true}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://host.docker.internal:4318}
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('localhost', 8765)); s.close()"]
       interval: 30s

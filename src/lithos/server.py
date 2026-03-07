@@ -1,6 +1,8 @@
 """Lithos MCP Server - FastMCP server exposing all tools."""
 
 import asyncio
+import hashlib
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -14,6 +16,9 @@ from lithos.coordination import CoordinationService
 from lithos.graph import KnowledgeGraph
 from lithos.knowledge import KnowledgeManager
 from lithos.search import SearchEngine
+from lithos.telemetry import get_tracer, register_active_claims_observer
+
+logger = logging.getLogger(__name__)
 
 
 class LithosServer:
@@ -33,6 +38,9 @@ class LithosServer:
         self.search = SearchEngine(self._config)
         self.graph = KnowledgeGraph(self._config)
         self.coordination = CoordinationService(self._config)
+
+        # Cached active claims count for the OTEL observable gauge callback
+        self._cached_active_claims: int = 0
 
         # File watcher
         self._observer: Observer | None = None
@@ -62,6 +70,9 @@ class LithosServer:
         # Initialize coordination database
         await self.coordination.initialize()
 
+        # Register active claims gauge observer
+        register_active_claims_observer(lambda: self._cached_active_claims)
+
         # Load or build indices
         if self.config.index.rebuild_on_start:
             await self._rebuild_indices()
@@ -72,20 +83,28 @@ class LithosServer:
 
     async def _rebuild_indices(self) -> None:
         """Rebuild all search indices from files."""
-        self.search.clear_all()
-        self.graph.clear()
+        tracer = get_tracer()
+        with tracer.start_as_current_span("lithos.index.rebuild") as span:
+            self.search.clear_all()
+            self.graph.clear()
 
-        knowledge_path = self.config.storage.knowledge_path
-        for file_path in knowledge_path.rglob("*.md"):
-            try:
-                relative_path = file_path.relative_to(knowledge_path)
-                doc, _ = await self.knowledge.read(path=str(relative_path))
-                self.search.index_document(doc)
-                self.graph.add_document(doc)
-            except Exception as e:
-                print(f"Error indexing {file_path}: {e}")
+            knowledge_path = self.config.storage.knowledge_path
+            file_count = 0
+            error_count = 0
+            for file_path in knowledge_path.rglob("*.md"):
+                try:
+                    relative_path = file_path.relative_to(knowledge_path)
+                    doc, _ = await self.knowledge.read(path=str(relative_path))
+                    self.search.index_document(doc)
+                    self.graph.add_document(doc)
+                    file_count += 1
+                except Exception as e:
+                    error_count += 1
+                    logger.error("Error indexing %s: %s", file_path, e)
 
-        self.graph.save_cache()
+            span.set_attribute("lithos.file_count", file_count)
+            span.set_attribute("lithos.error_count", error_count)
+            self.graph.save_cache()
 
     def start_file_watcher(self) -> None:
         """Start watching for file changes."""
@@ -118,28 +137,31 @@ class LithosServer:
         if path.suffix != ".md":
             return
 
-        async with self._update_lock:
-            try:
-                knowledge_path = self.config.storage.knowledge_path
+        tracer = get_tracer()
+        with tracer.start_as_current_span("lithos.file_change") as span:
+            span.set_attribute("lithos.deleted", deleted)
+            async with self._update_lock:
                 try:
-                    relative_path = path.relative_to(knowledge_path)
-                except ValueError:
-                    return
+                    knowledge_path = self.config.storage.knowledge_path
+                    try:
+                        relative_path = path.relative_to(knowledge_path)
+                    except ValueError:
+                        return
 
-                if deleted:
-                    doc_id = self.knowledge.get_id_by_path(relative_path)
-                    if doc_id:
-                        await self.knowledge.delete(doc_id)
-                        self.search.remove_document(doc_id)
-                        self.graph.remove_document(doc_id)
+                    if deleted:
+                        doc_id = self.knowledge.get_id_by_path(relative_path)
+                        if doc_id:
+                            await self.knowledge.delete(doc_id)
+                            self.search.remove_document(doc_id)
+                            self.graph.remove_document(doc_id)
+                            self.graph.save_cache()
+                    else:
+                        doc, _ = await self.knowledge.read(path=str(relative_path))
+                        self.search.index_document(doc)
+                        self.graph.add_document(doc)
                         self.graph.save_cache()
-                else:
-                    doc, _ = await self.knowledge.read(path=str(relative_path))
-                    self.search.index_document(doc)
-                    self.graph.add_document(doc)
-                    self.graph.save_cache()
-            except Exception as e:
-                print(f"Error handling file change {path}: {e}")
+                except Exception as e:
+                    logger.error("Error handling file change %s: %s", path, e)
 
     def _register_tools(self) -> None:
         """Register all MCP tools."""
@@ -172,36 +194,45 @@ class LithosServer:
             Returns:
                 Dict with id and path of the document
             """
-            await self.coordination.ensure_agent_known(agent)
+            logger.info("lithos_write agent=%s title=%r update=%s", agent, title, id is not None)
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.tool.write") as span:
+                span.set_attribute("lithos.tool", "lithos_write")
+                span.set_attribute("lithos.agent", agent)
+                span.set_attribute("lithos.is_update", id is not None)
 
-            if id:
-                # Update existing
-                doc = await self.knowledge.update(
-                    id=id,
-                    agent=agent,
-                    title=title,
-                    content=content,
-                    tags=tags,
-                    confidence=confidence,
-                )
-            else:
-                # Create new — default confidence to 1.0 when not specified
-                doc = await self.knowledge.create(
-                    title=title,
-                    content=content,
-                    agent=agent,
-                    tags=tags,
-                    confidence=confidence if confidence is not None else 1.0,
-                    path=path,
-                    source=source_task,
-                )
+                await self.coordination.ensure_agent_known(agent)
 
-            # Update indices
-            self.search.index_document(doc)
-            self.graph.add_document(doc)
-            self.graph.save_cache()
+                if id:
+                    # Update existing
+                    doc = await self.knowledge.update(
+                        id=id,
+                        agent=agent,
+                        title=title,
+                        content=content,
+                        tags=tags,
+                        confidence=confidence,
+                    )
+                else:
+                    # Create new — default confidence to 1.0 when not specified
+                    doc = await self.knowledge.create(
+                        title=title,
+                        content=content,
+                        agent=agent,
+                        tags=tags,
+                        confidence=confidence if confidence is not None else 1.0,
+                        path=path,
+                        source=source_task,
+                    )
 
-            return {"id": doc.id, "path": str(doc.path)}
+                # Update indices
+                self.search.index_document(doc)
+                self.graph.add_document(doc)
+                self.graph.save_cache()
+
+                span.set_attribute("lithos.doc_id", doc.id)
+                logger.info("lithos_write completed doc_id=%s", doc.id)
+                return {"id": doc.id, "path": str(doc.path)}
 
         @self.mcp.tool()
         async def lithos_read(
@@ -219,20 +250,30 @@ class LithosServer:
             Returns:
                 Dict with id, title, content, metadata, links, truncated
             """
-            doc, truncated = await self.knowledge.read(
-                id=id,
-                path=path,
-                max_length=max_length,
-            )
+            logger.info("lithos_read id=%s path=%s", id, path)
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.tool.read") as span:
+                span.set_attribute("lithos.tool", "lithos_read")
+                if id:
+                    span.set_attribute("lithos.id", id)
 
-            return {
-                "id": doc.id,
-                "title": doc.title,
-                "content": doc.content,
-                "metadata": doc.metadata.to_dict(),
-                "links": [{"target": link.target, "display": link.display} for link in doc.links],
-                "truncated": truncated,
-            }
+                doc, truncated = await self.knowledge.read(
+                    id=id,
+                    path=path,
+                    max_length=max_length,
+                )
+
+                span.set_attribute("lithos.truncated", truncated)
+                return {
+                    "id": doc.id,
+                    "title": doc.title,
+                    "content": doc.content,
+                    "metadata": doc.metadata.to_dict(),
+                    "links": [
+                        {"target": link.target, "display": link.display} for link in doc.links
+                    ],
+                    "truncated": truncated,
+                }
 
         @self.mcp.tool()
         async def lithos_delete(
@@ -248,17 +289,23 @@ class LithosServer:
             Returns:
                 Dict with success boolean
             """
-            if agent:
-                await self.coordination.ensure_agent_known(agent)
+            logger.info("lithos_delete id=%s agent=%s", id, agent)
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.tool.delete") as span:
+                span.set_attribute("lithos.tool", "lithos_delete")
+                span.set_attribute("lithos.id", id)
+                if agent:
+                    span.set_attribute("lithos.agent", agent)
+                    await self.coordination.ensure_agent_known(agent)
 
-            success = await self.knowledge.delete(id)
+                success = await self.knowledge.delete(id)
 
-            if success:
-                self.search.remove_document(id)
-                self.graph.remove_document(id)
-                self.graph.save_cache()
+                if success:
+                    self.search.remove_document(id)
+                    self.graph.remove_document(id)
+                    self.graph.save_cache()
 
-            return {"success": success}
+                return {"success": success}
 
         @self.mcp.tool()
         async def lithos_search(
@@ -280,26 +327,39 @@ class LithosServer:
             Returns:
                 Dict with results list containing id, title, snippet, score, path
             """
-            results = self.search.full_text_search(
-                query=query,
-                limit=limit,
-                tags=tags,
-                author=author,
-                path_prefix=path_prefix,
-            )
+            logger.info("lithos_search query_len=%d limit=%d", len(query), limit)
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.tool.search") as span:
+                span.set_attribute("lithos.tool", "lithos_search")
+                span.set_attribute("lithos.query.length", len(query))
+                span.set_attribute(
+                    "lithos.query.sha256",
+                    hashlib.sha256(query.encode()).hexdigest()[:16],
+                )
+                span.set_attribute("lithos.limit", limit)
 
-            return {
-                "results": [
-                    {
-                        "id": r.id,
-                        "title": r.title,
-                        "snippet": r.snippet,
-                        "score": r.score,
-                        "path": r.path,
-                    }
-                    for r in results
-                ]
-            }
+                results = self.search.full_text_search(
+                    query=query,
+                    limit=limit,
+                    tags=tags,
+                    author=author,
+                    path_prefix=path_prefix,
+                )
+
+                span.set_attribute("lithos.result_count", len(results))
+                logger.info("lithos_search results=%d", len(results))
+                return {
+                    "results": [
+                        {
+                            "id": r.id,
+                            "title": r.title,
+                            "snippet": r.snippet,
+                            "score": r.score,
+                            "path": r.path,
+                        }
+                        for r in results
+                    ]
+                }
 
         @self.mcp.tool()
         async def lithos_semantic(
@@ -319,25 +379,38 @@ class LithosServer:
             Returns:
                 Dict with results list containing id, title, snippet, similarity, path
             """
-            results = self.search.semantic_search(
-                query=query,
-                limit=limit,
-                threshold=threshold,
-                tags=tags,
-            )
+            logger.info("lithos_semantic query_len=%d limit=%d", len(query), limit)
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.tool.semantic") as span:
+                span.set_attribute("lithos.tool", "lithos_semantic")
+                span.set_attribute("lithos.query.length", len(query))
+                span.set_attribute(
+                    "lithos.query.sha256",
+                    hashlib.sha256(query.encode()).hexdigest()[:16],
+                )
+                span.set_attribute("lithos.limit", limit)
 
-            return {
-                "results": [
-                    {
-                        "id": r.id,
-                        "title": r.title,
-                        "snippet": r.snippet,
-                        "similarity": r.similarity,
-                        "path": r.path,
-                    }
-                    for r in results
-                ]
-            }
+                results = self.search.semantic_search(
+                    query=query,
+                    limit=limit,
+                    threshold=threshold,
+                    tags=tags,
+                )
+
+                span.set_attribute("lithos.result_count", len(results))
+                logger.info("lithos_semantic results=%d", len(results))
+                return {
+                    "results": [
+                        {
+                            "id": r.id,
+                            "title": r.title,
+                            "snippet": r.snippet,
+                            "similarity": r.similarity,
+                            "path": r.path,
+                        }
+                        for r in results
+                    ]
+                }
 
         @self.mcp.tool()
         async def lithos_list(
@@ -361,32 +434,40 @@ class LithosServer:
             Returns:
                 Dict with items list and total count
             """
-            since_dt = None
-            if since:
-                since_dt = datetime.fromisoformat(since)
+            logger.info("lithos_list limit=%d offset=%d", limit, offset)
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.tool.list") as span:
+                span.set_attribute("lithos.tool", "lithos_list")
+                span.set_attribute("lithos.limit", limit)
 
-            docs, total = await self.knowledge.list_all(
-                path_prefix=path_prefix,
-                tags=tags,
-                author=author,
-                since=since_dt,
-                limit=limit,
-                offset=offset,
-            )
+                since_dt = None
+                if since:
+                    since_dt = datetime.fromisoformat(since)
 
-            return {
-                "items": [
-                    {
-                        "id": d.id,
-                        "title": d.title,
-                        "path": str(d.path),
-                        "updated": d.metadata.updated_at.isoformat(),
-                        "tags": d.metadata.tags,
-                    }
-                    for d in docs
-                ],
-                "total": total,
-            }
+                docs, total = await self.knowledge.list_all(
+                    path_prefix=path_prefix,
+                    tags=tags,
+                    author=author,
+                    since=since_dt,
+                    limit=limit,
+                    offset=offset,
+                )
+
+                span.set_attribute("lithos.result_count", len(docs))
+                logger.info("lithos_list results=%d total=%d", len(docs), total)
+                return {
+                    "items": [
+                        {
+                            "id": d.id,
+                            "title": d.title,
+                            "path": str(d.path),
+                            "updated": d.metadata.updated_at.isoformat(),
+                            "tags": d.metadata.tags,
+                        }
+                        for d in docs
+                    ],
+                    "total": total,
+                }
 
         # ==================== Graph Tools ====================
 
@@ -406,19 +487,27 @@ class LithosServer:
             Returns:
                 Dict with outgoing and incoming lists of {id, title}
             """
-            if direction not in ("outgoing", "incoming", "both"):
-                direction = "both"
+            logger.info("lithos_links id=%s direction=%s depth=%d", id, direction, depth)
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.tool.links") as span:
+                span.set_attribute("lithos.tool", "lithos_links")
+                span.set_attribute("lithos.id", id)
+                span.set_attribute("lithos.direction", direction)
+                span.set_attribute("lithos.depth", depth)
 
-            links = self.graph.get_links(
-                doc_id=id,
-                direction=direction,  # type: ignore
-                depth=depth,
-            )
+                if direction not in ("outgoing", "incoming", "both"):
+                    direction = "both"
 
-            return {
-                "outgoing": [{"id": link.id, "title": link.title} for link in links.outgoing],
-                "incoming": [{"id": link.id, "title": link.title} for link in links.incoming],
-            }
+                links = self.graph.get_links(
+                    doc_id=id,
+                    direction=direction,  # type: ignore
+                    depth=depth,
+                )
+
+                return {
+                    "outgoing": [{"id": link.id, "title": link.title} for link in links.outgoing],
+                    "incoming": [{"id": link.id, "title": link.title} for link in links.incoming],
+                }
 
         @self.mcp.tool()
         async def lithos_tags() -> dict[str, dict[str, int]]:
@@ -427,8 +516,13 @@ class LithosServer:
             Returns:
                 Dict with tags mapping tag name to count
             """
-            tags = await self.knowledge.get_all_tags()
-            return {"tags": tags}
+            logger.info("lithos_tags")
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.tool.tags") as span:
+                span.set_attribute("lithos.tool", "lithos_tags")
+                tags = await self.knowledge.get_all_tags()
+                span.set_attribute("lithos.tag_count", len(tags))
+                return {"tags": tags}
 
         # ==================== Agent Tools ====================
 
@@ -450,13 +544,19 @@ class LithosServer:
             Returns:
                 Dict with success and created booleans
             """
-            success, created = await self.coordination.register_agent(
-                agent_id=id,
-                name=name,
-                agent_type=type,
-                metadata=metadata,
-            )
-            return {"success": success, "created": created}
+            logger.info("lithos_agent_register id=%s type=%s", id, type)
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.tool.agent_register") as span:
+                span.set_attribute("lithos.tool", "lithos_agent_register")
+                span.set_attribute("lithos.agent.id", id)
+                success, created = await self.coordination.register_agent(
+                    agent_id=id,
+                    name=name,
+                    agent_type=type,
+                    metadata=metadata,
+                )
+                span.set_attribute("lithos.created", created)
+                return {"success": success, "created": created}
 
         @self.mcp.tool()
         async def lithos_agent_info(
@@ -470,18 +570,27 @@ class LithosServer:
             Returns:
                 Agent info dict or None if not found
             """
-            agent = await self.coordination.get_agent(id)
-            if not agent:
-                return None
+            logger.info("lithos_agent_info id=%s", id)
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.tool.agent_info") as span:
+                span.set_attribute("lithos.tool", "lithos_agent_info")
+                span.set_attribute("lithos.agent.id", id)
+                agent = await self.coordination.get_agent(id)
+                if not agent:
+                    return None
 
-            return {
-                "id": agent.id,
-                "name": agent.name,
-                "type": agent.type,
-                "first_seen_at": agent.first_seen_at.isoformat() if agent.first_seen_at else None,
-                "last_seen_at": agent.last_seen_at.isoformat() if agent.last_seen_at else None,
-                "metadata": agent.metadata,
-            }
+                return {
+                    "id": agent.id,
+                    "name": agent.name,
+                    "type": agent.type,
+                    "first_seen_at": (
+                        agent.first_seen_at.isoformat() if agent.first_seen_at else None
+                    ),
+                    "last_seen_at": (
+                        agent.last_seen_at.isoformat() if agent.last_seen_at else None
+                    ),
+                    "metadata": agent.metadata,
+                }
 
         @self.mcp.tool()
         async def lithos_agent_list(
@@ -497,26 +606,34 @@ class LithosServer:
             Returns:
                 Dict with agents list
             """
-            since_dt = None
-            if active_since:
-                since_dt = datetime.fromisoformat(active_since)
+            logger.info("lithos_agent_list type=%s", type)
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.tool.agent_list") as span:
+                span.set_attribute("lithos.tool", "lithos_agent_list")
 
-            agents = await self.coordination.list_agents(
-                agent_type=type,
-                active_since=since_dt,
-            )
+                since_dt = None
+                if active_since:
+                    since_dt = datetime.fromisoformat(active_since)
 
-            return {
-                "agents": [
-                    {
-                        "id": a.id,
-                        "name": a.name,
-                        "type": a.type,
-                        "last_seen_at": a.last_seen_at.isoformat() if a.last_seen_at else None,
-                    }
-                    for a in agents
-                ]
-            }
+                agents = await self.coordination.list_agents(
+                    agent_type=type,
+                    active_since=since_dt,
+                )
+
+                span.set_attribute("lithos.result_count", len(agents))
+                return {
+                    "agents": [
+                        {
+                            "id": a.id,
+                            "name": a.name,
+                            "type": a.type,
+                            "last_seen_at": (
+                                a.last_seen_at.isoformat() if a.last_seen_at else None
+                            ),
+                        }
+                        for a in agents
+                    ]
+                }
 
         # ==================== Coordination Tools ====================
 
@@ -538,13 +655,19 @@ class LithosServer:
             Returns:
                 Dict with task_id
             """
-            task_id = await self.coordination.create_task(
-                title=title,
-                agent=agent,
-                description=description,
-                tags=tags,
-            )
-            return {"task_id": task_id}
+            logger.info("lithos_task_create agent=%s title=%r", agent, title)
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.tool.task_create") as span:
+                span.set_attribute("lithos.tool", "lithos_task_create")
+                span.set_attribute("lithos.agent", agent)
+                task_id = await self.coordination.create_task(
+                    title=title,
+                    agent=agent,
+                    description=description,
+                    tags=tags,
+                )
+                span.set_attribute("lithos.task_id", task_id)
+                return {"task_id": task_id}
 
         @self.mcp.tool()
         async def lithos_task_claim(
@@ -564,16 +687,24 @@ class LithosServer:
             Returns:
                 Dict with success and expires_at
             """
-            success, expires_at = await self.coordination.claim_task(
-                task_id=task_id,
-                aspect=aspect,
-                agent=agent,
-                ttl_minutes=ttl_minutes,
-            )
-            return {
-                "success": success,
-                "expires_at": expires_at.isoformat() if expires_at else None,
-            }
+            logger.info("lithos_task_claim task=%s aspect=%s agent=%s", task_id, aspect, agent)
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.tool.task_claim") as span:
+                span.set_attribute("lithos.tool", "lithos_task_claim")
+                span.set_attribute("lithos.agent", agent)
+                span.set_attribute("lithos.task_id", task_id)
+                span.set_attribute("lithos.aspect", aspect)
+                success, expires_at = await self.coordination.claim_task(
+                    task_id=task_id,
+                    aspect=aspect,
+                    agent=agent,
+                    ttl_minutes=ttl_minutes,
+                )
+                span.set_attribute("lithos.success", success)
+                return {
+                    "success": success,
+                    "expires_at": expires_at.isoformat() if expires_at else None,
+                }
 
         @self.mcp.tool()
         async def lithos_task_renew(
@@ -593,16 +724,24 @@ class LithosServer:
             Returns:
                 Dict with success and new_expires_at
             """
-            success, new_expires = await self.coordination.renew_claim(
-                task_id=task_id,
-                aspect=aspect,
-                agent=agent,
-                ttl_minutes=ttl_minutes,
-            )
-            return {
-                "success": success,
-                "new_expires_at": new_expires.isoformat() if new_expires else None,
-            }
+            logger.info("lithos_task_renew task=%s aspect=%s agent=%s", task_id, aspect, agent)
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.tool.task_renew") as span:
+                span.set_attribute("lithos.tool", "lithos_task_renew")
+                span.set_attribute("lithos.agent", agent)
+                span.set_attribute("lithos.task_id", task_id)
+                span.set_attribute("lithos.aspect", aspect)
+                success, new_expires = await self.coordination.renew_claim(
+                    task_id=task_id,
+                    aspect=aspect,
+                    agent=agent,
+                    ttl_minutes=ttl_minutes,
+                )
+                span.set_attribute("lithos.success", success)
+                return {
+                    "success": success,
+                    "new_expires_at": (new_expires.isoformat() if new_expires else None),
+                }
 
         @self.mcp.tool()
         async def lithos_task_release(
@@ -620,12 +759,20 @@ class LithosServer:
             Returns:
                 Dict with success boolean
             """
-            success = await self.coordination.release_claim(
-                task_id=task_id,
-                aspect=aspect,
-                agent=agent,
-            )
-            return {"success": success}
+            logger.info("lithos_task_release task=%s aspect=%s agent=%s", task_id, aspect, agent)
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.tool.task_release") as span:
+                span.set_attribute("lithos.tool", "lithos_task_release")
+                span.set_attribute("lithos.agent", agent)
+                span.set_attribute("lithos.task_id", task_id)
+                span.set_attribute("lithos.aspect", aspect)
+                success = await self.coordination.release_claim(
+                    task_id=task_id,
+                    aspect=aspect,
+                    agent=agent,
+                )
+                span.set_attribute("lithos.success", success)
+                return {"success": success}
 
         @self.mcp.tool()
         async def lithos_task_complete(
@@ -641,11 +788,18 @@ class LithosServer:
             Returns:
                 Dict with success boolean
             """
-            success = await self.coordination.complete_task(
-                task_id=task_id,
-                agent=agent,
-            )
-            return {"success": success}
+            logger.info("lithos_task_complete task=%s agent=%s", task_id, agent)
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.tool.task_complete") as span:
+                span.set_attribute("lithos.tool", "lithos_task_complete")
+                span.set_attribute("lithos.agent", agent)
+                span.set_attribute("lithos.task_id", task_id)
+                success = await self.coordination.complete_task(
+                    task_id=task_id,
+                    agent=agent,
+                )
+                span.set_attribute("lithos.success", success)
+                return {"success": success}
 
         @self.mcp.tool()
         async def lithos_task_status(
@@ -659,26 +813,33 @@ class LithosServer:
             Returns:
                 Dict with tasks list containing id, title, status, claims
             """
-            statuses = await self.coordination.get_task_status(task_id)
+            logger.info("lithos_task_status task_id=%s", task_id)
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.tool.task_status") as span:
+                span.set_attribute("lithos.tool", "lithos_task_status")
+                if task_id:
+                    span.set_attribute("lithos.task_id", task_id)
 
-            return {
-                "tasks": [
-                    {
-                        "id": s.id,
-                        "title": s.title,
-                        "status": s.status,
-                        "claims": [
-                            {
-                                "agent": c.agent,
-                                "aspect": c.aspect,
-                                "expires_at": c.expires_at.isoformat(),
-                            }
-                            for c in s.claims
-                        ],
-                    }
-                    for s in statuses
-                ]
-            }
+                statuses = await self.coordination.get_task_status(task_id)
+
+                return {
+                    "tasks": [
+                        {
+                            "id": s.id,
+                            "title": s.title,
+                            "status": s.status,
+                            "claims": [
+                                {
+                                    "agent": c.agent,
+                                    "aspect": c.aspect,
+                                    "expires_at": c.expires_at.isoformat(),
+                                }
+                                for c in s.claims
+                            ],
+                        }
+                        for s in statuses
+                    ]
+                }
 
         @self.mcp.tool()
         async def lithos_finding_post(
@@ -698,13 +859,20 @@ class LithosServer:
             Returns:
                 Dict with finding_id
             """
-            finding_id = await self.coordination.post_finding(
-                task_id=task_id,
-                agent=agent,
-                summary=summary,
-                knowledge_id=knowledge_id,
-            )
-            return {"finding_id": finding_id}
+            logger.info("lithos_finding_post task=%s agent=%s", task_id, agent)
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.tool.finding_post") as span:
+                span.set_attribute("lithos.tool", "lithos_finding_post")
+                span.set_attribute("lithos.agent", agent)
+                span.set_attribute("lithos.task_id", task_id)
+                finding_id = await self.coordination.post_finding(
+                    task_id=task_id,
+                    agent=agent,
+                    summary=summary,
+                    knowledge_id=knowledge_id,
+                )
+                span.set_attribute("lithos.finding_id", finding_id)
+                return {"finding_id": finding_id}
 
         @self.mcp.tool()
         async def lithos_finding_list(
@@ -720,27 +888,34 @@ class LithosServer:
             Returns:
                 Dict with findings list
             """
-            since_dt = None
-            if since:
-                since_dt = datetime.fromisoformat(since)
+            logger.info("lithos_finding_list task=%s", task_id)
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.tool.finding_list") as span:
+                span.set_attribute("lithos.tool", "lithos_finding_list")
+                span.set_attribute("lithos.task_id", task_id)
 
-            findings = await self.coordination.list_findings(
-                task_id=task_id,
-                since=since_dt,
-            )
+                since_dt = None
+                if since:
+                    since_dt = datetime.fromisoformat(since)
 
-            return {
-                "findings": [
-                    {
-                        "id": f.id,
-                        "agent": f.agent,
-                        "summary": f.summary,
-                        "knowledge_id": f.knowledge_id,
-                        "created_at": f.created_at.isoformat() if f.created_at else None,
-                    }
-                    for f in findings
-                ]
-            }
+                findings = await self.coordination.list_findings(
+                    task_id=task_id,
+                    since=since_dt,
+                )
+
+                span.set_attribute("lithos.result_count", len(findings))
+                return {
+                    "findings": [
+                        {
+                            "id": f.id,
+                            "agent": f.agent,
+                            "summary": f.summary,
+                            "knowledge_id": f.knowledge_id,
+                            "created_at": (f.created_at.isoformat() if f.created_at else None),
+                        }
+                        for f in findings
+                    ]
+                }
 
         # ==================== System Tools ====================
 
@@ -751,26 +926,34 @@ class LithosServer:
             Returns:
                 Dict with documents, chunks, agents, active_tasks, open_claims, tags counts
             """
-            # Get document count
-            _, total_docs = await self.knowledge.list_all(limit=0)
+            logger.info("lithos_stats")
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.tool.stats") as span:
+                span.set_attribute("lithos.tool", "lithos_stats")
 
-            # Get search stats
-            search_stats = self.search.get_stats()
+                # Get document count
+                _, total_docs = await self.knowledge.list_all(limit=0)
 
-            # Get coordination stats
-            coord_stats = await self.coordination.get_stats()
+                # Get search stats
+                search_stats = self.search.get_stats()
 
-            # Get tag count
-            tags = await self.knowledge.get_all_tags()
+                # Get coordination stats
+                coord_stats = await self.coordination.get_stats()
 
-            return {
-                "documents": total_docs,
-                "chunks": search_stats.get("chunks", 0),
-                "agents": coord_stats.get("agents", 0),
-                "active_tasks": coord_stats.get("active_tasks", 0),
-                "open_claims": coord_stats.get("open_claims", 0),
-                "tags": len(tags),
-            }
+                # Update cached active claims for OTEL gauge
+                self._cached_active_claims = coord_stats.get("open_claims", 0)
+
+                # Get tag count
+                tags = await self.knowledge.get_all_tags()
+
+                return {
+                    "documents": total_docs,
+                    "chunks": search_stats.get("chunks", 0),
+                    "agents": coord_stats.get("agents", 0),
+                    "active_tasks": coord_stats.get("active_tasks", 0),
+                    "open_claims": coord_stats.get("open_claims", 0),
+                    "tags": len(tags),
+                }
 
 
 class _FileChangeHandler(FileSystemEventHandler):
@@ -807,7 +990,7 @@ class _FileChangeHandler(FileSystemEventHandler):
         try:
             exception = future.exception()
             if exception:
-                print(f"Error processing file update: {exception}")
+                logger.error("Error processing file update: %s", exception)
         except Exception:
             pass
 

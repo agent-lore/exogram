@@ -38,11 +38,11 @@ Exit criteria:
 
 ## Phase 1 - Observability Foundation (OTEL)
 
-- [ ] Add optional OTEL dependencies and config
-- [ ] Implement `telemetry.py` no-op + active modes
-- [ ] Wire setup/shutdown in CLI lifecycle
-- [ ] Instrument `knowledge.py`, `search.py`, `coordination.py`, and tool handlers
-- [ ] Add telemetry tests and lifecycle test
+- [x] Add optional OTEL dependencies and config
+- [x] Implement `telemetry.py` no-op + active modes
+- [x] Wire setup/shutdown in CLI lifecycle
+- [x] Instrument `knowledge.py`, `search.py`, `coordination.py`, and tool handlers
+- [x] Add telemetry tests and lifecycle test
 
 Dependencies:
 

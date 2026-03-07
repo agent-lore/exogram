@@ -72,6 +72,16 @@ class CoordinationConfig(BaseModel):
     claim_max_ttl_minutes: int = 480  # minutes
 
 
+class TelemetryConfig(BaseModel):
+    """OpenTelemetry configuration."""
+
+    enabled: bool = False
+    endpoint: str | None = None  # OTLP HTTP endpoint, e.g. "http://otel-collector:4318"
+    console_fallback: bool = False  # Print spans to stdout when no endpoint
+    service_name: str = "lithos"
+    export_interval_ms: int = 30_000  # Metrics export interval
+
+
 class IndexConfig(BaseModel):
     """Index configuration."""
 
@@ -93,6 +103,7 @@ class LithosConfig(BaseSettings):
     search: SearchConfig = Field(default_factory=SearchConfig)
     coordination: CoordinationConfig = Field(default_factory=CoordinationConfig)
     index: IndexConfig = Field(default_factory=IndexConfig)
+    telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
 
     @classmethod
     def from_yaml(cls, path: Path) -> "LithosConfig":
@@ -146,6 +157,15 @@ def load_config(path: str | None = None) -> LithosConfig:
     env_host = os.environ.get("LITHOS_HOST")
     if env_host:
         config.server.host = env_host
+
+    # Backward compat: LITHOS_OTEL_ENABLED and OTEL_EXPORTER_OTLP_ENDPOINT
+    env_otel_enabled = os.environ.get("LITHOS_OTEL_ENABLED")
+    if env_otel_enabled:
+        config.telemetry.enabled = env_otel_enabled.lower() in ("1", "true")
+
+    env_otlp_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+    if env_otlp_endpoint:
+        config.telemetry.endpoint = env_otlp_endpoint
 
     return config
 

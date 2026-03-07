@@ -1,6 +1,7 @@
 """Lithos CLI - Command-line interface."""
 
 import asyncio
+import logging
 from pathlib import Path
 
 import click
@@ -72,9 +73,12 @@ def serve(
 ) -> None:
     """Start the Lithos MCP server."""
     from lithos.server import create_server
+    from lithos.telemetry import setup_telemetry, shutdown_telemetry
 
     config: LithosConfig = ctx.obj["config"]
     server = create_server(config)
+    log_fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+    log_datefmt = "%Y-%m-%dT%H:%M:%S%z"
 
     async def run_server() -> None:
         # Initialize server
@@ -100,13 +104,52 @@ def serve(
                 port=port,
                 path="/sse",
                 show_banner=False,
+                uvicorn_config={
+                    "log_config": {
+                        "version": 1,
+                        "disable_existing_loggers": False,
+                        "formatters": {
+                            "default": {"fmt": log_fmt, "datefmt": log_datefmt},
+                            "access": {"fmt": log_fmt, "datefmt": log_datefmt},
+                        },
+                        "handlers": {
+                            "default": {
+                                "formatter": "default",
+                                "class": "logging.StreamHandler",
+                                "stream": "ext://sys.stderr",
+                            },
+                            "access": {
+                                "formatter": "access",
+                                "class": "logging.StreamHandler",
+                                "stream": "ext://sys.stdout",
+                            },
+                        },
+                        "loggers": {
+                            "uvicorn": {
+                                "handlers": ["default"],
+                                "level": "INFO",
+                                "propagate": False,
+                            },
+                            "uvicorn.error": {"level": "INFO", "propagate": False},
+                            "uvicorn.access": {
+                                "handlers": ["access"],
+                                "level": "INFO",
+                                "propagate": False,
+                            },
+                        },
+                    },
+                },
             )
 
     try:
+        logging.basicConfig(level=logging.INFO, format=log_fmt, datefmt=log_datefmt)
+        setup_telemetry(config)
         asyncio.run(run_server())
     except KeyboardInterrupt:
         click.echo("\nShutting down...")
         server.stop_file_watcher()
+    finally:
+        shutdown_telemetry()
 
 
 @cli.command()

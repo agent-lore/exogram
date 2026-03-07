@@ -10,6 +10,7 @@ from typing import Any, Literal
 import aiosqlite
 
 from lithos.config import LithosConfig, get_config
+from lithos.telemetry import lithos_metrics, traced
 
 # SQL Schema
 SCHEMA = """
@@ -340,6 +341,7 @@ class CoordinationService:
 
     # ==================== Task Operations ====================
 
+    @traced("lithos.coordination.create_task")
     async def create_task(
         self,
         title: str,
@@ -354,6 +356,7 @@ class CoordinationService:
         """
         import json
 
+        lithos_metrics.coordination_ops.add(1, {"op": "create_task"})
         await self.ensure_agent_known(agent)
 
         task_id = str(uuid.uuid4())
@@ -401,12 +404,14 @@ class CoordinationService:
                 tags=tags,
             )
 
+    @traced("lithos.coordination.complete_task")
     async def complete_task(self, task_id: str, agent: str) -> bool:
         """Mark task as completed and release all claims.
 
         Returns:
             True if task was completed
         """
+        lithos_metrics.coordination_ops.add(1, {"op": "complete"})
         await self.ensure_agent_known(agent)
 
         async with aiosqlite.connect(self.db_path) as db:
@@ -492,6 +497,7 @@ class CoordinationService:
 
     # ==================== Claim Operations ====================
 
+    @traced("lithos.coordination.claim_task")
     async def claim_task(
         self,
         task_id: str,
@@ -510,6 +516,7 @@ class CoordinationService:
         Returns:
             Tuple of (success, expires_at)
         """
+        lithos_metrics.coordination_ops.add(1, {"op": "claim"})
         await self.ensure_agent_known(agent)
 
         # Clamp TTL
@@ -638,6 +645,7 @@ class CoordinationService:
             await db.commit()
             return True, new_expires
 
+    @traced("lithos.coordination.release_claim")
     async def release_claim(
         self,
         task_id: str,

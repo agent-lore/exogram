@@ -78,4 +78,10 @@ uv run lithos serve --transport sse --port 8765
 
 # Docker
 cd docker && docker compose up -d --build
+
+# run pointing at data dir
+LITHOS_DATA_PATH="<DATA DIR PATH>" docker compose up -d --build
+
+# stop
+cd docker && docker compose down
 ```

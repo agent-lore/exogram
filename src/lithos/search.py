@@ -3,6 +3,7 @@
 import logging
 import re
 import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from sentence_transformers import SentenceTransformer
 from lithos.config import LithosConfig, get_config
 from lithos.errors import IndexingError, SearchBackendError
 from lithos.knowledge import KnowledgeDocument
+from lithos.telemetry import lithos_metrics, traced
 
 logger = logging.getLogger(__name__)
 
@@ -573,6 +575,7 @@ class SearchEngine:
             )
         return self._chroma
 
+    @traced("lithos.search.index_document")
     def index_document(self, doc: KnowledgeDocument) -> int:
         """Index a document in both search engines.
 
@@ -613,6 +616,7 @@ class SearchEngine:
 
         return chunks
 
+    @traced("lithos.search.remove_document")
     def remove_document(self, doc_id: str) -> None:
         """Remove a document from both search engines.
 
@@ -642,6 +646,7 @@ class SearchEngine:
                 errors,
             )
 
+    @traced("lithos.search.fulltext")
     def full_text_search(
         self,
         query: str,
@@ -657,6 +662,8 @@ class SearchEngine:
                 An empty result list means *no documents matched*; this error
                 means the query could not be executed at all.
         """
+        start = time.perf_counter()
+        success = True
         try:
             return self.tantivy.search(
                 query=query,
@@ -666,12 +673,20 @@ class SearchEngine:
                 path_prefix=path_prefix,
             )
         except Exception as exc:
+            success = False
             logger.error("Full-text search failed: %s", exc)
             raise SearchBackendError(
                 "Full-text search backend (tantivy) failed",
                 {"tantivy": exc},
             ) from exc
+        finally:
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            lithos_metrics.search_ops.add(1, {"type": "fulltext"})
+            lithos_metrics.search_duration.record(
+                elapsed_ms, {"type": "fulltext", "success": success}
+            )
 
+    @traced("lithos.search.semantic")
     def semantic_search(
         self,
         query: str,
@@ -688,6 +703,8 @@ class SearchEngine:
         """
         if threshold is None:
             threshold = self.config.search.semantic_threshold
+        start = time.perf_counter()
+        success = True
         try:
             return self.chroma.search(
                 query=query,
@@ -696,11 +713,18 @@ class SearchEngine:
                 tags=tags,
             )
         except Exception as exc:
+            success = False
             logger.error("Semantic search failed: %s", exc)
             raise SearchBackendError(
                 "Semantic search backend (chroma) failed",
                 {"chroma": exc},
             ) from exc
+        finally:
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            lithos_metrics.search_ops.add(1, {"type": "semantic"})
+            lithos_metrics.search_duration.record(
+                elapsed_ms, {"type": "semantic", "success": success}
+            )
 
     def clear_all(self) -> None:
         """Clear all indices."""
