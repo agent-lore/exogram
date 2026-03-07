@@ -1100,3 +1100,33 @@ class TestDeleteRemovesUrl:
         )
         result = await knowledge_manager.delete(doc.id)
         assert result is True
+
+
+class TestConcurrentWriteDedup:
+    """Tests for US-008: Concurrent write dedup safety."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_creates_one_succeeds_one_duplicate(
+        self, knowledge_manager: KnowledgeManager
+    ):
+        """Two simultaneous creates with same URL: exactly one succeeds."""
+        results = await asyncio.gather(
+            knowledge_manager.create(
+                title="Racer A",
+                content="Content A.",
+                agent="agent-a",
+                source_url="https://example.com/race",
+            ),
+            knowledge_manager.create(
+                title="Racer B",
+                content="Content B.",
+                agent="agent-b",
+                source_url="https://example.com/race",
+            ),
+        )
+
+        docs = [r for r in results if isinstance(r, KnowledgeDocument)]
+        dups = [r for r in results if isinstance(r, dict) and r.get("status") == "duplicate"]
+
+        assert len(docs) == 1, f"Expected 1 success, got {len(docs)}"
+        assert len(dups) == 1, f"Expected 1 duplicate, got {len(dups)}"
