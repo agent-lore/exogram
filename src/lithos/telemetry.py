@@ -46,6 +46,7 @@ except ImportError:
 _initialized = False
 _tracer_provider: Any = None  # TracerProvider when active
 _meter_provider: Any = None  # MeterProvider when active
+_log_provider: Any = None  # LoggerProvider when active
 
 
 # --- No-op stubs for when OTEL is absent or disabled ---
@@ -121,7 +122,7 @@ def setup_telemetry(config: LithosConfig, *, _test_span_exporter: Any = None) ->
     Safe to call even if OTEL packages are not installed or telemetry
     is disabled -- in both cases this is a no-op.
     """
-    global _initialized, _tracer_provider, _meter_provider
+    global _initialized, _tracer_provider, _meter_provider, _log_provider
 
     if _initialized:
         return
@@ -204,14 +205,14 @@ def setup_telemetry(config: LithosConfig, *, _test_span_exporter: Any = None) ->
         from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
         from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 
-        log_provider = LoggerProvider(resource=resource)
-        log_provider.add_log_record_processor(
+        _log_provider = LoggerProvider(resource=resource)
+        _log_provider.add_log_record_processor(
             BatchLogRecordProcessor(OTLPLogExporter(endpoint=logs_endpoint))
         )
-        set_logger_provider(log_provider)
+        set_logger_provider(_log_provider)
 
         # Attach OTEL handler to the root logger so all Python logs are exported
-        otel_handler = LoggingHandler(level=logging.DEBUG, logger_provider=log_provider)
+        otel_handler = LoggingHandler(level=logging.DEBUG, logger_provider=_log_provider)
         logging.getLogger().addHandler(otel_handler)
 
     _initialized = True
@@ -224,7 +225,7 @@ def shutdown_telemetry() -> None:
     Ensures in-flight spans are exported before the process terminates.
     Safe to call if telemetry was never initialized.
     """
-    global _initialized, _tracer_provider, _meter_provider
+    global _initialized, _tracer_provider, _meter_provider, _log_provider
 
     if not _initialized:
         return
@@ -237,6 +238,11 @@ def shutdown_telemetry() -> None:
     if _meter_provider is not None:
         _meter_provider.shutdown()
         _meter_provider = None
+
+    if _log_provider is not None:
+        _log_provider.force_flush()
+        _log_provider.shutdown()
+        _log_provider = None
 
     _initialized = False
     logger.debug("OpenTelemetry shut down")
@@ -417,10 +423,11 @@ lithos_metrics = _LithosMetrics()
 
 def _reset_for_testing() -> None:
     """Reset module state. For tests only."""
-    global _initialized, _tracer_provider, _meter_provider
+    global _initialized, _tracer_provider, _meter_provider, _log_provider
     _initialized = False
     _tracer_provider = None
     _meter_provider = None
+    _log_provider = None
 
     # Reset global OTEL providers so set_tracer_provider() can be called again
     if _HAS_OTEL:
