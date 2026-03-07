@@ -462,6 +462,10 @@ class ChromaIndex:
                 "path": str(doc.path),
                 "author": doc.metadata.author,
                 "tags": ",".join(doc.metadata.tags),
+                "source_url": doc.metadata.source_url or "",
+                "updated_at": (
+                    doc.metadata.updated_at.isoformat() if doc.metadata.updated_at else ""
+                ),
             }
             for i in range(len(chunks))
         ]
