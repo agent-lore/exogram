@@ -40,6 +40,7 @@ _KNOWN_METADATA_KEYS = frozenset(
         "confidence",
         "contributors",
         "source",
+        "source_url",
         "supersedes",
     }
 )
@@ -59,6 +60,7 @@ class KnowledgeMetadata:
     confidence: float = 1.0
     contributors: list[str] = field(default_factory=list)
     source: str | None = None
+    source_url: str | None = None
     supersedes: str | None = None
     extra: dict = field(default_factory=dict)
 
@@ -82,6 +84,8 @@ class KnowledgeMetadata:
             "source": self.source,
             "supersedes": self.supersedes,
         }
+        if self.source_url is not None:
+            result["source_url"] = self.source_url
         # Merge unknown fields — known keys always take precedence.
         for key, value in self.extra.items():
             if key not in result:
@@ -120,6 +124,7 @@ class KnowledgeMetadata:
             confidence=data.get("confidence", 1.0),
             contributors=data.get("contributors", []),
             source=data.get("source"),
+            source_url=data.get("source_url"),
             supersedes=data.get("supersedes"),
             extra=extra,
         )
@@ -296,6 +301,7 @@ class KnowledgeManager:
         confidence: float = 1.0,
         path: str | None = None,
         source: str | None = None,
+        source_url: str | None = None,
     ) -> KnowledgeDocument:
         """Create a new knowledge document."""
         lithos_metrics.knowledge_ops.add(1, {"op": "create"})
@@ -312,6 +318,7 @@ class KnowledgeManager:
             confidence=confidence,
             contributors=[],
             source=source,
+            source_url=source_url,
         )
 
         # Determine file path

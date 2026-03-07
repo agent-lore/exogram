@@ -7,6 +7,7 @@ import pytest
 
 from lithos.knowledge import (
     KnowledgeManager,
+    KnowledgeMetadata,
     generate_slug,
     parse_wiki_links,
 )
@@ -481,3 +482,103 @@ class TestDocumentPersistence:
         """Read blocks path traversal outside knowledge directory."""
         with pytest.raises(ValueError, match="within knowledge directory"):
             await knowledge_manager.read(path="../outside.md")
+
+
+class TestSourceUrlField:
+    """Tests for source_url field on KnowledgeMetadata."""
+
+    def test_source_url_in_known_metadata_keys(self):
+        """source_url is a recognised metadata key."""
+        from lithos.knowledge import _KNOWN_METADATA_KEYS
+
+        assert "source_url" in _KNOWN_METADATA_KEYS
+
+    def test_metadata_source_url_default_none(self):
+        """source_url defaults to None."""
+        meta = KnowledgeMetadata(
+            id="test-id",
+            title="Test",
+            author="agent",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        assert meta.source_url is None
+
+    def test_to_dict_includes_source_url_when_set(self):
+        """to_dict() includes source_url when it has a value."""
+        meta = KnowledgeMetadata(
+            id="test-id",
+            title="Test",
+            author="agent",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            source_url="https://example.com/page",
+        )
+        d = meta.to_dict()
+        assert d["source_url"] == "https://example.com/page"
+
+    def test_to_dict_omits_source_url_when_none(self):
+        """to_dict() omits source_url when None."""
+        meta = KnowledgeMetadata(
+            id="test-id",
+            title="Test",
+            author="agent",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        d = meta.to_dict()
+        assert "source_url" not in d
+
+    def test_from_dict_reads_source_url(self):
+        """from_dict() reads source_url from frontmatter data."""
+        data = {
+            "id": "test-id",
+            "title": "Test",
+            "author": "agent",
+            "source_url": "https://example.com/page",
+        }
+        meta = KnowledgeMetadata.from_dict(data)
+        assert meta.source_url == "https://example.com/page"
+
+    def test_from_dict_defaults_source_url_to_none(self):
+        """from_dict() defaults source_url to None when absent."""
+        data = {"id": "test-id", "title": "Test", "author": "agent"}
+        meta = KnowledgeMetadata.from_dict(data)
+        assert meta.source_url is None
+
+    @pytest.mark.asyncio
+    async def test_round_trip_source_url(self, knowledge_manager: KnowledgeManager, test_config):
+        """Write a doc with source_url, read it back, value matches."""
+        created = await knowledge_manager.create(
+            title="URL Doc",
+            content="Has a source URL.",
+            agent="agent",
+            source_url="https://example.com/article",
+        )
+
+        doc, _ = await knowledge_manager.read(id=created.id)
+        assert doc.metadata.source_url == "https://example.com/article"
+
+        # Also verify raw frontmatter on disk
+        import yaml
+
+        file_path = test_config.storage.knowledge_path / created.path
+        raw = file_path.read_text()
+        parts = raw.split("---", 2)
+        fm = yaml.safe_load(parts[1])
+        assert fm["source_url"] == "https://example.com/article"
+
+    @pytest.mark.asyncio
+    async def test_existing_docs_without_source_url_load_fine(
+        self, knowledge_manager: KnowledgeManager, test_config
+    ):
+        """Documents without source_url load without error (defaults to None)."""
+        # Create doc without source_url
+        created = await knowledge_manager.create(
+            title="No URL Doc",
+            content="No source URL.",
+            agent="agent",
+        )
+
+        doc, _ = await knowledge_manager.read(id=created.id)
+        assert doc.metadata.source_url is None
