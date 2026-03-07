@@ -744,3 +744,100 @@ class TestDedupMapAndLock:
 
         mgr2 = KnowledgeManager()
         assert len(mgr2._source_url_to_id) == 0
+
+
+class TestStartupDuplicateAudit:
+    """Tests for US-004: startup duplicate URL detection."""
+
+    @pytest.mark.asyncio
+    async def test_detects_url_collisions(self, test_config, caplog):
+        """Two docs with same source_url are detected as collision at startup."""
+        import logging
+
+        mgr1 = KnowledgeManager()
+        await mgr1.create(
+            title="First Doc",
+            content="First.",
+            agent="agent",
+            source_url="https://example.com/dup",
+        )
+        doc2 = await mgr1.create(
+            title="Second Doc",
+            content="Second.",
+            agent="agent",
+            source_url="https://example.com/dup",
+        )
+        # Manually write source_url to second doc (bypasses future dedup enforcement)
+        file2 = test_config.storage.knowledge_path / doc2.path
+        raw = file2.read_text()
+        raw = raw.replace("---\n", "---\nsource_url: https://example.com/dup\n", 1)
+        file2.write_text(raw)
+
+        with caplog.at_level(logging.WARNING, logger="lithos.knowledge"):
+            mgr2 = KnowledgeManager()
+
+        assert mgr2.duplicate_url_count >= 1
+        assert "Duplicate source_url" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_first_seen_wins(self, test_config):
+        """First document (sorted by path) wins the map entry on collision."""
+        mgr1 = KnowledgeManager()
+        # Create two docs - "aaa" sorts before "zzz"
+        doc_a = await mgr1.create(
+            title="AAA Doc",
+            content="First by path.",
+            agent="agent",
+            source_url="https://example.com/collision",
+        )
+        doc_z = await mgr1.create(
+            title="ZZZ Doc",
+            content="Second by path.",
+            agent="agent",
+            source_url="https://example.com/collision",
+        )
+        # Force source_url onto second doc on disk
+        file_z = test_config.storage.knowledge_path / doc_z.path
+        raw = file_z.read_text()
+        raw = raw.replace("---\n", "---\nsource_url: https://example.com/collision\n", 1)
+        file_z.write_text(raw)
+
+        mgr2 = KnowledgeManager()
+        norm = normalize_url("https://example.com/collision")
+        # First-seen (sorted path) should win
+        assert mgr2._source_url_to_id[norm] == doc_a.id
+
+    @pytest.mark.asyncio
+    async def test_startup_does_not_fail_on_collisions(self, test_config):
+        """Startup completes successfully even with URL collisions."""
+        mgr1 = KnowledgeManager()
+        doc1 = await mgr1.create(
+            title="Doc One",
+            content="Content.",
+            agent="agent",
+            source_url="https://example.com/same",
+        )
+        doc2 = await mgr1.create(
+            title="Doc Two",
+            content="Content.",
+            agent="agent",
+        )
+        # Force same source_url onto second doc on disk
+        file2 = test_config.storage.knowledge_path / doc2.path
+        raw = file2.read_text()
+        raw = raw.replace("---\n", "---\nsource_url: https://example.com/same\n", 1)
+        file2.write_text(raw)
+
+        # Should not raise
+        mgr2 = KnowledgeManager()
+        assert mgr2.duplicate_url_count >= 1
+        # Both docs are accessible
+        d1, _ = await mgr2.read(id=doc1.id)
+        d2, _ = await mgr2.read(id=doc2.id)
+        assert d1 is not None
+        assert d2 is not None
+
+    def test_no_collisions_gives_zero_count(self, test_config):
+        """With no duplicates, duplicate_url_count is 0."""
+        mgr = KnowledgeManager()
+        assert mgr.duplicate_url_count == 0

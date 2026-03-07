@@ -1,6 +1,7 @@
 """Knowledge module - Markdown document CRUD with frontmatter."""
 
 import asyncio
+import logging
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -12,6 +13,8 @@ import frontmatter
 
 from lithos.config import get_config
 from lithos.telemetry import lithos_metrics, traced
+
+logger = logging.getLogger(__name__)
 
 # Wiki-link pattern: [[target]] or [[target|display]]
 WIKI_LINK_PATTERN = re.compile(r"\[\[([^\]\[|]*[a-zA-Z][^\]\[|]*)(?:\|([^\]]+))?\]\]")
@@ -321,6 +324,7 @@ class KnowledgeManager:
         self._slug_to_id: dict[str, str] = {}
         self._source_url_to_id: dict[str, str] = {}
         self._write_lock = asyncio.Lock()
+        self.duplicate_url_count: int = 0
         self._scan_existing()
 
     def _scan_existing(self) -> None:
@@ -337,6 +341,7 @@ class KnowledgeManager:
                 continue
             candidates.append((md_file.relative_to(self.knowledge_path), md_file))
         candidates.sort(key=lambda t: t[0])
+        collisions: list[tuple[str, str, str]] = []  # (norm_url, first_id, dup_id)
 
         for rel_path, md_file in candidates:
             try:
@@ -355,10 +360,26 @@ class KnowledgeManager:
                             norm = normalize_url(raw_url)
                             if norm not in self._source_url_to_id:
                                 self._source_url_to_id[norm] = doc_id
+                            else:
+                                existing_id = self._source_url_to_id[norm]
+                                collisions.append((norm, existing_id, doc_id))
                         except ValueError:
                             pass  # Skip invalid URLs on load
             except Exception:
                 pass  # Skip invalid files
+
+        # Report collisions deterministically (sorted by normalized URL).
+        if collisions:
+            collisions.sort(key=lambda t: t[0])
+            self.duplicate_url_count = len(collisions)
+            for norm_url, first_id, dup_id in collisions:
+                logger.warning(
+                    "Duplicate source_url at startup: %s owned by %s, "
+                    "duplicate in %s (skipped)",
+                    norm_url,
+                    first_id,
+                    dup_id,
+                )
 
     def _resolve_safe_path(self, path: Path) -> tuple[Path, Path]:
         """Resolve a path under knowledge root and prevent traversal."""
