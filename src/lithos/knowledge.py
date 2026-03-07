@@ -550,41 +550,100 @@ class KnowledgeManager:
         title: str | None = None,
         tags: list[str] | None = None,
         confidence: float | None = None,
-    ) -> KnowledgeDocument:
-        """Update an existing document."""
-        lithos_metrics.knowledge_ops.add(1, {"op": "update"})
-        doc, _ = await self.read(id=id)
-        old_slug = slugify(doc.metadata.title)
+        source_url: str | None | object = _UNSET,
+    ) -> KnowledgeDocument | dict:
+        """Update an existing document.
 
-        # Update fields
-        if content is not None:
-            doc.content = content
-            doc.links = parse_wiki_links(content)
-        if title is not None:
-            doc.title = title
-            doc.metadata.title = title
-        if tags is not None:
-            doc.metadata.tags = tags
-        if confidence is not None:
-            doc.metadata.confidence = confidence
+        source_url semantics:
+        - _UNSET (default): preserve existing source_url, no map change
+        - None: clear existing source_url, remove from map
+        - str: normalize, allow if same doc owns it, reject if different doc owns it
+        """
+        async with self._write_lock:
+            lithos_metrics.knowledge_ops.add(1, {"op": "update"})
+            doc, _ = await self.read(id=id)
+            old_slug = slugify(doc.metadata.title)
+            old_source_url = doc.metadata.source_url
 
-        # Update metadata
-        doc.metadata.updated_at = datetime.now(timezone.utc)
-        if agent not in doc.metadata.contributors and agent != doc.metadata.author:
-            doc.metadata.contributors.append(agent)
+            # Handle source_url update
+            if source_url is not _UNSET:
+                if source_url is None:
+                    # Clear source_url
+                    if old_source_url:
+                        try:
+                            old_norm = normalize_url(old_source_url)
+                            if self._source_url_to_id.get(old_norm) == id:
+                                del self._source_url_to_id[old_norm]
+                        except ValueError:
+                            pass
+                    doc.metadata.source_url = None
+                else:
+                    # Set/change source_url
+                    try:
+                        new_norm = normalize_url(source_url)
+                    except ValueError as e:
+                        return {"status": "invalid_input", "message": str(e)}
 
-        # Write to disk
-        _safe_path, full_path = self._resolve_safe_path(doc.path)
-        full_path.write_text(doc.to_markdown())
+                    existing_owner = self._source_url_to_id.get(new_norm)
+                    if existing_owner is not None and existing_owner != id:
+                        try:
+                            existing_doc, _ = await self.read(id=existing_owner)
+                            return {
+                                "status": "duplicate",
+                                "duplicate_of": {
+                                    "id": existing_owner,
+                                    "title": existing_doc.title,
+                                    "source_url": new_norm,
+                                },
+                                "message": (
+                                    f"URL already exists in document "
+                                    f"'{existing_doc.title}'"
+                                ),
+                            }
+                        except FileNotFoundError:
+                            del self._source_url_to_id[new_norm]
 
-        # Keep slug index in sync when title changes.
-        new_slug = slugify(doc.metadata.title)
-        if new_slug != old_slug:
-            if self._slug_to_id.get(old_slug) == id:
-                del self._slug_to_id[old_slug]
-            self._slug_to_id[new_slug] = id
+                    # Remove old mapping if URL changed
+                    if old_source_url:
+                        try:
+                            old_norm = normalize_url(old_source_url)
+                            if old_norm != new_norm and self._source_url_to_id.get(old_norm) == id:
+                                del self._source_url_to_id[old_norm]
+                        except ValueError:
+                            pass
 
-        return doc
+                    doc.metadata.source_url = new_norm
+                    self._source_url_to_id[new_norm] = id
+
+            # Update fields
+            if content is not None:
+                doc.content = content
+                doc.links = parse_wiki_links(content)
+            if title is not None:
+                doc.title = title
+                doc.metadata.title = title
+            if tags is not None:
+                doc.metadata.tags = tags
+            if confidence is not None:
+                doc.metadata.confidence = confidence
+
+            # Update metadata
+            doc.metadata.updated_at = datetime.now(timezone.utc)
+            if agent not in doc.metadata.contributors and agent != doc.metadata.author:
+                doc.metadata.contributors.append(agent)
+
+            # Write to disk
+            _safe_path, full_path = self._resolve_safe_path(doc.path)
+            full_path.write_text(doc.to_markdown())
+
+            # Keep slug index in sync when title changes.
+            new_slug = slugify(doc.metadata.title)
+            if new_slug != old_slug:
+                if self._slug_to_id.get(old_slug) == id:
+                    del self._slug_to_id[old_slug]
+                self._slug_to_id[new_slug] = id
+
+            return doc
 
     @traced("lithos.knowledge.delete")
     async def delete(self, id: str) -> bool:
