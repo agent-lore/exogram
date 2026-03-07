@@ -302,11 +302,13 @@ class LithosServer:
                 )
 
                 span.set_attribute("lithos.truncated", truncated)
+                meta = doc.metadata.to_dict()
+                meta["source_url"] = doc.metadata.source_url  # null when None
                 return {
                     "id": doc.id,
                     "title": doc.title,
                     "content": doc.content,
-                    "metadata": doc.metadata.to_dict(),
+                    "metadata": meta,
                     "links": [
                         {"target": link.target, "display": link.display} for link in doc.links
                     ],
@@ -394,6 +396,9 @@ class LithosServer:
                             "snippet": r.snippet,
                             "score": r.score,
                             "path": r.path,
+                            "source_url": r.source_url,
+                            "updated_at": r.updated_at,
+                            "is_stale": r.is_stale,
                         }
                         for r in results
                     ]
@@ -445,6 +450,9 @@ class LithosServer:
                             "snippet": r.snippet,
                             "similarity": r.similarity,
                             "path": r.path,
+                            "source_url": r.source_url,
+                            "updated_at": r.updated_at,
+                            "is_stale": r.is_stale,
                         }
                         for r in results
                     ]
@@ -501,6 +509,7 @@ class LithosServer:
                             "path": str(d.path),
                             "updated": d.metadata.updated_at.isoformat(),
                             "tags": d.metadata.tags,
+                            "source_url": d.metadata.source_url or "",
                         }
                         for d in docs
                     ],
@@ -991,6 +1000,7 @@ class LithosServer:
                     "active_tasks": coord_stats.get("active_tasks", 0),
                     "open_claims": coord_stats.get("open_claims", 0),
                     "tags": len(tags),
+                    "duplicate_urls": self.knowledge.duplicate_url_count,
                 }
 
 
