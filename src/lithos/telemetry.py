@@ -193,6 +193,27 @@ def setup_telemetry(config: LithosConfig, *, _test_span_exporter: Any = None) ->
         _meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
         metrics.set_meter_provider(_meter_provider)
 
+    # --- Logs ---
+    logs_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
+    if not logs_endpoint and endpoint:
+        logs_endpoint = _signal_endpoint(endpoint, "logs")
+
+    if logs_endpoint:
+        from opentelemetry._logs import set_logger_provider
+        from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+        from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+        from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+
+        log_provider = LoggerProvider(resource=resource)
+        log_provider.add_log_record_processor(
+            BatchLogRecordProcessor(OTLPLogExporter(endpoint=logs_endpoint))
+        )
+        set_logger_provider(log_provider)
+
+        # Attach OTEL handler to the root logger so all Python logs are exported
+        otel_handler = LoggingHandler(level=logging.DEBUG, logger_provider=log_provider)
+        logging.getLogger().addHandler(otel_handler)
+
     _initialized = True
     logger.info("OpenTelemetry initialized (endpoint=%s)", endpoint)
 

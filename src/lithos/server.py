@@ -194,6 +194,7 @@ class LithosServer:
             Returns:
                 Dict with id and path of the document
             """
+            logger.info("lithos_write agent=%s title=%r update=%s", agent, title, id is not None)
             tracer = get_tracer()
             with tracer.start_as_current_span("lithos.tool.write") as span:
                 span.set_attribute("lithos.tool", "lithos_write")
@@ -230,6 +231,7 @@ class LithosServer:
                 self.graph.save_cache()
 
                 span.set_attribute("lithos.doc_id", doc.id)
+                logger.info("lithos_write completed doc_id=%s", doc.id)
                 return {"id": doc.id, "path": str(doc.path)}
 
         @self.mcp.tool()
@@ -248,6 +250,7 @@ class LithosServer:
             Returns:
                 Dict with id, title, content, metadata, links, truncated
             """
+            logger.info("lithos_read id=%s path=%s", id, path)
             tracer = get_tracer()
             with tracer.start_as_current_span("lithos.tool.read") as span:
                 span.set_attribute("lithos.tool", "lithos_read")
@@ -286,6 +289,7 @@ class LithosServer:
             Returns:
                 Dict with success boolean
             """
+            logger.info("lithos_delete id=%s agent=%s", id, agent)
             tracer = get_tracer()
             with tracer.start_as_current_span("lithos.tool.delete") as span:
                 span.set_attribute("lithos.tool", "lithos_delete")
@@ -323,6 +327,7 @@ class LithosServer:
             Returns:
                 Dict with results list containing id, title, snippet, score, path
             """
+            logger.info("lithos_search query_len=%d limit=%d", len(query), limit)
             tracer = get_tracer()
             with tracer.start_as_current_span("lithos.tool.search") as span:
                 span.set_attribute("lithos.tool", "lithos_search")
@@ -342,6 +347,7 @@ class LithosServer:
                 )
 
                 span.set_attribute("lithos.result_count", len(results))
+                logger.info("lithos_search results=%d", len(results))
                 return {
                     "results": [
                         {
@@ -373,6 +379,7 @@ class LithosServer:
             Returns:
                 Dict with results list containing id, title, snippet, similarity, path
             """
+            logger.info("lithos_semantic query_len=%d limit=%d", len(query), limit)
             tracer = get_tracer()
             with tracer.start_as_current_span("lithos.tool.semantic") as span:
                 span.set_attribute("lithos.tool", "lithos_semantic")
@@ -391,6 +398,7 @@ class LithosServer:
                 )
 
                 span.set_attribute("lithos.result_count", len(results))
+                logger.info("lithos_semantic results=%d", len(results))
                 return {
                     "results": [
                         {
@@ -426,6 +434,7 @@ class LithosServer:
             Returns:
                 Dict with items list and total count
             """
+            logger.info("lithos_list limit=%d offset=%d", limit, offset)
             tracer = get_tracer()
             with tracer.start_as_current_span("lithos.tool.list") as span:
                 span.set_attribute("lithos.tool", "lithos_list")
@@ -445,6 +454,7 @@ class LithosServer:
                 )
 
                 span.set_attribute("lithos.result_count", len(docs))
+                logger.info("lithos_list results=%d total=%d", len(docs), total)
                 return {
                     "items": [
                         {
@@ -477,6 +487,7 @@ class LithosServer:
             Returns:
                 Dict with outgoing and incoming lists of {id, title}
             """
+            logger.info("lithos_links id=%s direction=%s depth=%d", id, direction, depth)
             tracer = get_tracer()
             with tracer.start_as_current_span("lithos.tool.links") as span:
                 span.set_attribute("lithos.tool", "lithos_links")
@@ -505,6 +516,7 @@ class LithosServer:
             Returns:
                 Dict with tags mapping tag name to count
             """
+            logger.info("lithos_tags")
             tracer = get_tracer()
             with tracer.start_as_current_span("lithos.tool.tags") as span:
                 span.set_attribute("lithos.tool", "lithos_tags")
@@ -532,6 +544,7 @@ class LithosServer:
             Returns:
                 Dict with success and created booleans
             """
+            logger.info("lithos_agent_register id=%s type=%s", id, type)
             tracer = get_tracer()
             with tracer.start_as_current_span("lithos.tool.agent_register") as span:
                 span.set_attribute("lithos.tool", "lithos_agent_register")
@@ -557,6 +570,7 @@ class LithosServer:
             Returns:
                 Agent info dict or None if not found
             """
+            logger.info("lithos_agent_info id=%s", id)
             tracer = get_tracer()
             with tracer.start_as_current_span("lithos.tool.agent_info") as span:
                 span.set_attribute("lithos.tool", "lithos_agent_info")
@@ -592,6 +606,7 @@ class LithosServer:
             Returns:
                 Dict with agents list
             """
+            logger.info("lithos_agent_list type=%s", type)
             tracer = get_tracer()
             with tracer.start_as_current_span("lithos.tool.agent_list") as span:
                 span.set_attribute("lithos.tool", "lithos_agent_list")
@@ -640,6 +655,7 @@ class LithosServer:
             Returns:
                 Dict with task_id
             """
+            logger.info("lithos_task_create agent=%s title=%r", agent, title)
             tracer = get_tracer()
             with tracer.start_as_current_span("lithos.tool.task_create") as span:
                 span.set_attribute("lithos.tool", "lithos_task_create")
@@ -671,6 +687,7 @@ class LithosServer:
             Returns:
                 Dict with success and expires_at
             """
+            logger.info("lithos_task_claim task=%s aspect=%s agent=%s", task_id, aspect, agent)
             tracer = get_tracer()
             with tracer.start_as_current_span("lithos.tool.task_claim") as span:
                 span.set_attribute("lithos.tool", "lithos_task_claim")
@@ -707,6 +724,7 @@ class LithosServer:
             Returns:
                 Dict with success and new_expires_at
             """
+            logger.info("lithos_task_renew task=%s aspect=%s agent=%s", task_id, aspect, agent)
             tracer = get_tracer()
             with tracer.start_as_current_span("lithos.tool.task_renew") as span:
                 span.set_attribute("lithos.tool", "lithos_task_renew")
@@ -741,6 +759,7 @@ class LithosServer:
             Returns:
                 Dict with success boolean
             """
+            logger.info("lithos_task_release task=%s aspect=%s agent=%s", task_id, aspect, agent)
             tracer = get_tracer()
             with tracer.start_as_current_span("lithos.tool.task_release") as span:
                 span.set_attribute("lithos.tool", "lithos_task_release")
@@ -769,6 +788,7 @@ class LithosServer:
             Returns:
                 Dict with success boolean
             """
+            logger.info("lithos_task_complete task=%s agent=%s", task_id, agent)
             tracer = get_tracer()
             with tracer.start_as_current_span("lithos.tool.task_complete") as span:
                 span.set_attribute("lithos.tool", "lithos_task_complete")
@@ -793,6 +813,7 @@ class LithosServer:
             Returns:
                 Dict with tasks list containing id, title, status, claims
             """
+            logger.info("lithos_task_status task_id=%s", task_id)
             tracer = get_tracer()
             with tracer.start_as_current_span("lithos.tool.task_status") as span:
                 span.set_attribute("lithos.tool", "lithos_task_status")
@@ -838,6 +859,7 @@ class LithosServer:
             Returns:
                 Dict with finding_id
             """
+            logger.info("lithos_finding_post task=%s agent=%s", task_id, agent)
             tracer = get_tracer()
             with tracer.start_as_current_span("lithos.tool.finding_post") as span:
                 span.set_attribute("lithos.tool", "lithos_finding_post")
@@ -866,6 +888,7 @@ class LithosServer:
             Returns:
                 Dict with findings list
             """
+            logger.info("lithos_finding_list task=%s", task_id)
             tracer = get_tracer()
             with tracer.start_as_current_span("lithos.tool.finding_list") as span:
                 span.set_attribute("lithos.tool", "lithos_finding_list")
@@ -903,6 +926,7 @@ class LithosServer:
             Returns:
                 Dict with documents, chunks, agents, active_tasks, open_claims, tags counts
             """
+            logger.info("lithos_stats")
             tracer = get_tracer()
             with tracer.start_as_current_span("lithos.tool.stats") as span:
                 span.set_attribute("lithos.tool", "lithos_stats")
