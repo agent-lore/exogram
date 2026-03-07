@@ -1886,6 +1886,53 @@ class TestSourceUrlMCPResponses:
         assert isinstance(result["warnings"], list)
 
     @pytest.mark.asyncio
+    async def test_write_clear_source_url(self, server: LithosServer):
+        """lithos_write with source_url="" clears existing source_url and frees dedup slot."""
+        created = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Clearable URL Doc",
+                "content": "Has a source_url initially.",
+                "agent": "source-url-agent",
+                "source_url": "https://example.com/clearable",
+            },
+        )
+        assert created["status"] == "created"
+        doc_id = created["id"]
+
+        # Clear source_url by passing empty string
+        updated = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Clearable URL Doc",
+                "content": "Source URL cleared.",
+                "agent": "source-url-agent",
+                "id": doc_id,
+                "source_url": "",
+            },
+        )
+        assert updated["status"] == "updated"
+
+        # Read back — source_url should be None
+        read_result = await _call_tool(server, "lithos_read", {"id": doc_id})
+        assert read_result["metadata"]["source_url"] is None
+
+        # Dedup slot freed — another doc can now claim the same URL
+        second = await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Reuse Cleared URL",
+                "content": "Takes over the freed URL.",
+                "agent": "source-url-agent",
+                "source_url": "https://example.com/clearable",
+            },
+        )
+        assert second["status"] == "created"
+
+    @pytest.mark.asyncio
     async def test_read_includes_source_url(self, server: LithosServer):
         """lithos_read metadata includes source_url."""
         created = await _call_tool(

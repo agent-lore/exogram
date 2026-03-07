@@ -193,7 +193,8 @@ class LithosServer:
                 path: Subdirectory path (e.g., "procedures")
                 id: UUID to update existing; omit to create new
                 source_task: Task ID this knowledge came from
-                source_url: URL provenance for this knowledge
+                source_url: URL provenance for this knowledge. Pass "" to clear an
+                    existing source_url on update.
 
             Returns:
                 Dict with status envelope: created/updated/duplicate
@@ -210,8 +211,14 @@ class LithosServer:
                 warnings: list[str] = []
 
                 if id:
-                    # Update existing — pass source_url with _UNSET default
-                    url_arg = source_url if source_url is not None else _UNSET
+                    # Update existing — map MCP boundary to manager semantics:
+                    # None (omitted) → _UNSET (preserve), "" → None (clear), str → pass through
+                    if source_url is None:
+                        url_arg = _UNSET
+                    elif source_url == "":
+                        url_arg = None
+                    else:
+                        url_arg = source_url
                     result = await self.knowledge.update(
                         id=id,
                         agent=agent,
@@ -231,7 +238,7 @@ class LithosServer:
                         confidence=confidence if confidence is not None else 1.0,
                         path=path,
                         source=source_task,
-                        source_url=source_url,
+                        source_url=source_url or None,
                     )
 
                 # Handle dict results (duplicate or invalid_input)
