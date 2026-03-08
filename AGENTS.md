@@ -16,15 +16,17 @@ Lithos is a local, privacy-first MCP server that provides a shared knowledge bas
 
 ## Done Criteria (Required)
 
-A change is **not done** unless all four are green:
+A change is **not done** unless all five are green:
 
 1. Unit tests: `uv run --extra dev pytest -m "not integration" tests/ -q`
 2. Integration tests: `uv run --extra dev pytest -m integration tests/ -q`
 3. Lint: `uv run --extra dev ruff check .`
 4. Format check: `uv run --extra dev ruff format --check src/ tests/`
+5. Type check: `uv run --extra dev pyright src/`
 
 ## Code Conventions
 
+- **Pyright** for type checking (basic mode)
 - **Ruff** for linting and formatting (line-length 100, double quotes, spaces)
 - Lint rules: E, F, I (isort), UP, B, SIM, RUF
 - Async throughout: tests use `pytest-asyncio` with `asyncio_mode = "auto"`

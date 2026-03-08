@@ -30,6 +30,9 @@ jobs:
       - name: Run Ruff formatter check
         run: uv run ruff format --check src/ tests/
 
+      - name: Run Pyright type check
+        run: uv run pyright src/
+
   test:
     name: Test
     runs-on: ubuntu-latest

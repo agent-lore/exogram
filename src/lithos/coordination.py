@@ -742,18 +742,21 @@ class CoordinationService:
         async with aiosqlite.connect(self.db_path) as db:
             # Count agents
             cursor = await db.execute("SELECT COUNT(*) FROM agents")
-            agents = (await cursor.fetchone())[0]
+            row = await cursor.fetchone()
+            agents = row[0] if row else 0
 
             # Count active tasks
             cursor = await db.execute("SELECT COUNT(*) FROM tasks WHERE status = 'open'")
-            active_tasks = (await cursor.fetchone())[0]
+            row = await cursor.fetchone()
+            active_tasks = row[0] if row else 0
 
             # Count active claims
             cursor = await db.execute(
                 "SELECT COUNT(*) FROM claims WHERE expires_at > ?",
                 (now,),
             )
-            open_claims = (await cursor.fetchone())[0]
+            row = await cursor.fetchone()
+            open_claims = row[0] if row else 0
 
             return {
                 "agents": agents,

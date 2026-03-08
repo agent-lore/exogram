@@ -163,7 +163,9 @@ def setup_telemetry(config: LithosConfig, *, _test_span_exporter: Any = None) ->
     if _test_span_exporter is not None:
         _tracer_provider.add_span_processor(SimpleSpanProcessor(_test_span_exporter))
     elif traces_endpoint:
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (  # type: ignore[import-not-found]
+            OTLPSpanExporter,
+        )
 
         span_exporter = OTLPSpanExporter(endpoint=traces_endpoint)
         _tracer_provider.add_span_processor(BatchSpanProcessor(span_exporter))
@@ -176,7 +178,9 @@ def setup_telemetry(config: LithosConfig, *, _test_span_exporter: Any = None) ->
     metric_reader = None
 
     if metrics_endpoint:
-        from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+        from opentelemetry.exporter.otlp.proto.http.metric_exporter import (  # type: ignore[import-not-found]
+            OTLPMetricExporter,
+        )
 
         metric_reader = PeriodicExportingMetricReader(
             OTLPMetricExporter(endpoint=metrics_endpoint),
@@ -201,7 +205,9 @@ def setup_telemetry(config: LithosConfig, *, _test_span_exporter: Any = None) ->
 
     if logs_endpoint:
         from opentelemetry._logs import set_logger_provider
-        from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+        from opentelemetry.exporter.otlp.proto.http._log_exporter import (  # type: ignore[import-not-found]
+            OTLPLogExporter,
+        )
         from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
         from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 
@@ -435,5 +441,5 @@ def _reset_for_testing() -> None:
 
         trace._TRACER_PROVIDER_SET_ONCE = Once()
         trace._TRACER_PROVIDER = None
-        metrics._METER_PROVIDER_SET_ONCE = Once()
-        metrics._METER_PROVIDER = None
+        metrics._METER_PROVIDER_SET_ONCE = Once()  # type: ignore[attr-defined]
+        metrics._METER_PROVIDER = None  # type: ignore[attr-defined]
