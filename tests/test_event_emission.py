@@ -137,6 +137,7 @@ class TestNoteEventEmission:
         assert event.type == NOTE_DELETED
         assert event.agent == "test-agent"
         assert event.payload["id"] == doc_id
+        assert event.payload["path"], "delete event must include the document path"
         server.event_bus.unsubscribe(queue)
 
 

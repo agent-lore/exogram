@@ -651,12 +651,16 @@ class KnowledgeManager:
             return doc
 
     @traced("lithos.knowledge.delete")
-    async def delete(self, id: str) -> bool:
-        """Delete a document."""
+    async def delete(self, id: str) -> tuple[bool, str]:
+        """Delete a document.
+
+        Returns:
+            Tuple of (success, relative_path). Path is empty string if not found.
+        """
         async with self._write_lock:
             lithos_metrics.knowledge_ops.add(1, {"op": "delete"})
             if id not in self._id_to_path:
-                return False
+                return False, ""
 
             # Read doc to get source_url before deleting
             try:
@@ -682,7 +686,7 @@ class KnowledgeManager:
             # Remove from slug index
             self._slug_to_id = {k: v for k, v in self._slug_to_id.items() if v != id}
 
-            return True
+            return True, str(file_path)
 
     async def list_all(
         self,

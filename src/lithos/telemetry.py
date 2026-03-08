@@ -374,6 +374,7 @@ class _LithosMetrics:
         self._search_ops: Any = None
         self._search_duration: Any = None
         self._coordination_ops: Any = None
+        self._event_bus_ops: Any = None
 
     @property
     def knowledge_ops(self) -> Any:
@@ -410,6 +411,15 @@ class _LithosMetrics:
                 description="Coordination operations",
             )
         return self._coordination_ops
+
+    @property
+    def event_bus_ops(self) -> Any:
+        if self._event_bus_ops is None:
+            self._event_bus_ops = get_meter().create_counter(
+                "lithos.event_bus.operations",
+                description="Event bus emit and drop operations",
+            )
+        return self._event_bus_ops
 
 
 def register_active_claims_observer(get_active_claim_count: Callable[[], int]) -> None:

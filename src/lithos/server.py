@@ -169,7 +169,7 @@ class LithosServer:
                     if deleted:
                         doc_id = self.knowledge.get_id_by_path(relative_path)
                         if doc_id:
-                            await self.knowledge.delete(doc_id)
+                            await self.knowledge.delete(doc_id)  # path unused; watcher has it
                             self.search.remove_document(doc_id)
                             self.graph.remove_document(doc_id)
                             self.graph.save_cache()
@@ -396,7 +396,7 @@ class LithosServer:
                     span.set_attribute("lithos.agent", agent)
                     await self.coordination.ensure_agent_known(agent)
 
-                success = await self.knowledge.delete(id)
+                success, path = await self.knowledge.delete(id)
 
                 if success:
                     self.search.remove_document(id)
@@ -408,7 +408,7 @@ class LithosServer:
                             LithosEvent(
                                 type=NOTE_DELETED,
                                 agent=agent or "",
-                                payload={"id": id, "path": ""},
+                                payload={"id": id, "path": path},
                             )
                         )
                     except Exception:

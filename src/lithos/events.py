@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from lithos.config import EventsConfig
 
+from lithos.telemetry import get_tracer, lithos_metrics
+
 logger = logging.getLogger(__name__)
 
 # --- Event type constants ---
@@ -98,18 +100,27 @@ class EventBus:
         if not self._enabled:
             return
 
-        try:
-            self._buffer.append(event)
+        tracer = get_tracer()
+        with tracer.start_as_current_span("lithos.event_bus.emit") as span:
+            span.set_attribute("lithos.event.type", event.type)
+            lithos_metrics.event_bus_ops.add(1, {"op": "emit", "event_type": event.type})
+
+            try:
+                self._buffer.append(event)
+            except Exception:
+                logger.exception("EventBus.emit: buffer append failed")
+                return
 
             for sub in self._subscribers:
-                if not self._matches(event, sub):
-                    continue
                 try:
+                    if not self._matches(event, sub):
+                        continue
                     sub.queue.put_nowait(event)
                 except asyncio.QueueFull:
                     sub.drops += 1
-        except Exception:
-            logger.exception("EventBus.emit failed")
+                    lithos_metrics.event_bus_ops.add(1, {"op": "drop", "event_type": event.type})
+                except Exception:
+                    logger.exception("EventBus.emit: failed to deliver to subscriber")
 
     def subscribe(
         self,

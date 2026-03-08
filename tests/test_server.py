@@ -234,7 +234,7 @@ class TestKnowledgeToolWorkflow:
         assert "updated" in updated.metadata.tags
 
         # Delete
-        success = await server.knowledge.delete(doc_id)
+        success, _path = await server.knowledge.delete(doc_id)
         assert success
 
         # Verify deleted

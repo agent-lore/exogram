@@ -287,7 +287,7 @@ class TestKnowledgeManager:
             agent="agent",
         )
 
-        success = await knowledge_manager.delete(created.id)
+        success, _path = await knowledge_manager.delete(created.id)
 
         assert success
         with pytest.raises(FileNotFoundError):
@@ -296,7 +296,7 @@ class TestKnowledgeManager:
     @pytest.mark.asyncio
     async def test_delete_nonexistent_returns_false(self, knowledge_manager: KnowledgeManager):
         """Deleting nonexistent document returns False."""
-        success = await knowledge_manager.delete("nonexistent-id")
+        success, _path = await knowledge_manager.delete("nonexistent-id")
         assert not success
 
     @pytest.mark.asyncio
@@ -1057,7 +1057,7 @@ class TestDeleteRemovesUrl:
         norm = normalize_url("https://example.com/deletable")
         assert norm in knowledge_manager._source_url_to_id
 
-        await knowledge_manager.delete(doc.id)
+        await knowledge_manager.delete(doc.id)  # return value unused
         assert norm not in knowledge_manager._source_url_to_id
 
     @pytest.mark.asyncio
@@ -1069,7 +1069,7 @@ class TestDeleteRemovesUrl:
             agent="agent",
             source_url="https://example.com/reusable",
         )
-        await knowledge_manager.delete(doc.id)
+        await knowledge_manager.delete(doc.id)  # return value unused
 
         new_doc = await knowledge_manager.create(
             title="Second",
@@ -1088,8 +1088,8 @@ class TestDeleteRemovesUrl:
             content="Content.",
             agent="agent",
         )
-        result = await knowledge_manager.delete(doc.id)
-        assert result is True
+        success, _path = await knowledge_manager.delete(doc.id)
+        assert success is True
 
 
 class TestConcurrentWriteDedup:
