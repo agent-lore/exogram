@@ -2592,6 +2592,204 @@ class TestRebuildIndicesProvenance:
         assert derived_id not in mgr._id_to_title
 
 
+class TestLithosProvenance:
+    """Tests for US-011: lithos_provenance MCP tool."""
+
+    async def _create_doc(
+        self,
+        server: LithosServer,
+        title: str,
+        derived_from_ids: list[str] | None = None,
+    ) -> str:
+        """Helper to create a doc and return its ID."""
+        args: dict[str, Any] = {
+            "title": title,
+            "content": f"Content of {title}.",
+            "agent": "prov-agent",
+        }
+        if derived_from_ids is not None:
+            args["derived_from_ids"] = derived_from_ids
+        result = await _call_tool(server, "lithos_write", args)
+        assert result["status"] == "created"
+        return result["id"]
+
+    async def test_single_depth_sources(self, server: LithosServer):
+        """direction='sources' returns immediate source documents."""
+        source_id = await self._create_doc(server, "Prov Source A")
+        derived_id = await self._create_doc(server, "Prov Derived A", derived_from_ids=[source_id])
+
+        result = await _call_tool(
+            server, "lithos_provenance", {"id": derived_id, "direction": "sources"}
+        )
+        assert result["id"] == derived_id
+        assert len(result["sources"]) == 1
+        assert result["sources"][0]["id"] == source_id
+        assert result["sources"][0]["title"] == "Prov Source A"
+        assert result["derived"] == []
+
+    async def test_single_depth_derived(self, server: LithosServer):
+        """direction='derived' returns immediate derived documents."""
+        source_id = await self._create_doc(server, "Prov Source B")
+        derived_id = await self._create_doc(server, "Prov Derived B", derived_from_ids=[source_id])
+
+        result = await _call_tool(
+            server, "lithos_provenance", {"id": source_id, "direction": "derived"}
+        )
+        assert result["id"] == source_id
+        assert result["sources"] == []
+        assert len(result["derived"]) == 1
+        assert result["derived"][0]["id"] == derived_id
+
+    async def test_multi_depth_bfs_chain(self, server: LithosServer):
+        """depth=2 BFS traverses A->B->C chain."""
+        a_id = await self._create_doc(server, "Chain A")
+        b_id = await self._create_doc(server, "Chain B", derived_from_ids=[a_id])
+        c_id = await self._create_doc(server, "Chain C", derived_from_ids=[b_id])
+
+        # From A, derived depth=2 should find B and C
+        result = await _call_tool(
+            server,
+            "lithos_provenance",
+            {"id": a_id, "direction": "derived", "depth": 2},
+        )
+        derived_ids = [n["id"] for n in result["derived"]]
+        assert b_id in derived_ids
+        assert c_id in derived_ids
+
+        # From C, sources depth=2 should find B and A
+        result = await _call_tool(
+            server,
+            "lithos_provenance",
+            {"id": c_id, "direction": "sources", "depth": 2},
+        )
+        source_ids = [n["id"] for n in result["sources"]]
+        assert b_id in source_ids
+        assert a_id in source_ids
+
+    async def test_cycle_handling(self, server: LithosServer):
+        """Cycles (A->B, B->A) don't cause infinite traversal."""
+        a_id = await self._create_doc(server, "Cycle A")
+        b_id = await self._create_doc(server, "Cycle B", derived_from_ids=[a_id])
+
+        # Now update A to also derive from B (creates a cycle)
+        await _call_tool(
+            server,
+            "lithos_write",
+            {
+                "title": "Cycle A",
+                "content": "Updated.",
+                "agent": "prov-agent",
+                "id": a_id,
+                "derived_from_ids": [b_id],
+            },
+        )
+
+        # Should return without hanging, depth=3 to maximize traversal
+        result = await _call_tool(
+            server,
+            "lithos_provenance",
+            {"id": a_id, "direction": "both", "depth": 3},
+        )
+        # Both A's sources and derived should include B
+        source_ids = [n["id"] for n in result["sources"]]
+        derived_ids = [n["id"] for n in result["derived"]]
+        assert b_id in source_ids
+        assert b_id in derived_ids
+
+    async def test_unresolved_sources_included(self, server: LithosServer):
+        """include_unresolved=True shows unresolved source UUIDs."""
+        missing_id = "00000000-0000-0000-0000-000000aaaaaa"
+        doc_id = await self._create_doc(server, "Unresolved Prov", derived_from_ids=[missing_id])
+
+        result = await _call_tool(
+            server,
+            "lithos_provenance",
+            {"id": doc_id, "include_unresolved": True},
+        )
+        assert missing_id in result["unresolved_sources"]
+
+    async def test_unresolved_sources_excluded(self, server: LithosServer):
+        """include_unresolved=False omits unresolved_sources key."""
+        missing_id = "00000000-0000-0000-0000-000000bbbbbb"
+        doc_id = await self._create_doc(server, "No Unresolved Prov", derived_from_ids=[missing_id])
+
+        result = await _call_tool(
+            server,
+            "lithos_provenance",
+            {"id": doc_id, "include_unresolved": False},
+        )
+        assert "unresolved_sources" not in result
+
+    async def test_unknown_id_returns_error(self, server: LithosServer):
+        """Unknown ID returns doc_not_found error."""
+        result = await _call_tool(
+            server,
+            "lithos_provenance",
+            {"id": "00000000-0000-0000-0000-ffffffffffff"},
+        )
+        assert result["status"] == "error"
+        assert result["code"] == "doc_not_found"
+
+    async def test_both_direction(self, server: LithosServer):
+        """direction='both' returns sources and derived."""
+        a_id = await self._create_doc(server, "Both Source")
+        b_id = await self._create_doc(server, "Both Middle", derived_from_ids=[a_id])
+        c_id = await self._create_doc(server, "Both Derived", derived_from_ids=[b_id])
+
+        result = await _call_tool(
+            server,
+            "lithos_provenance",
+            {"id": b_id, "direction": "both"},
+        )
+        source_ids = [n["id"] for n in result["sources"]]
+        derived_ids = [n["id"] for n in result["derived"]]
+        assert a_id in source_ids
+        assert c_id in derived_ids
+
+    async def test_results_sorted_by_id(self, server: LithosServer):
+        """Sources and derived lists are sorted by ID."""
+        s1 = await self._create_doc(server, "Sort Source 1")
+        s2 = await self._create_doc(server, "Sort Source 2")
+        doc_id = await self._create_doc(server, "Sort Derived", derived_from_ids=[s1, s2])
+
+        result = await _call_tool(
+            server,
+            "lithos_provenance",
+            {"id": doc_id, "direction": "sources"},
+        )
+        ids = [n["id"] for n in result["sources"]]
+        assert ids == sorted(ids)
+
+    async def test_depth_clamped(self, server: LithosServer):
+        """Depth values are clamped to 1-3."""
+        a_id = await self._create_doc(server, "Clamp A")
+        b_id = await self._create_doc(server, "Clamp B", derived_from_ids=[a_id])
+        c_id = await self._create_doc(server, "Clamp C", derived_from_ids=[b_id])
+        _d_id = await self._create_doc(server, "Clamp D", derived_from_ids=[c_id])
+
+        # depth=0 should be clamped to 1
+        result = await _call_tool(
+            server,
+            "lithos_provenance",
+            {"id": a_id, "direction": "derived", "depth": 0},
+        )
+        derived_ids = [n["id"] for n in result["derived"]]
+        assert b_id in derived_ids
+        # depth=1 should not reach C
+        assert c_id not in derived_ids
+
+        # depth=100 should be clamped to 3
+        result = await _call_tool(
+            server,
+            "lithos_provenance",
+            {"id": a_id, "direction": "derived", "depth": 100},
+        )
+        derived_ids = [n["id"] for n in result["derived"]]
+        # Should reach up to 3 levels deep
+        assert b_id in derived_ids
+        assert c_id in derived_ids
+
+
 def test_conformance_module_exists():
     """Sanity check to keep this module discoverable in test listings."""
     assert Path(__file__).name == "test_integration_conformance.py"

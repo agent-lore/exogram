@@ -1,6 +1,7 @@
 """Lithos MCP Server - FastMCP server exposing all tools."""
 
 import asyncio
+import collections
 import concurrent.futures
 import hashlib
 import logging
@@ -130,6 +131,66 @@ class LithosServer:
             span.set_attribute("lithos.file_count", file_count)
             span.set_attribute("lithos.error_count", error_count)
             self.graph.save_cache()
+
+    def _bfs_provenance(self, start_id: str, direction: str, depth: int) -> list[dict[str, str]]:
+        """BFS traversal over provenance indexes.
+
+        Args:
+            start_id: Starting document ID (excluded from results).
+            direction: "sources" or "derived".
+            depth: Maximum traversal depth (already clamped to 1-3).
+
+        Returns:
+            Sorted list of {id, title} dicts for discovered nodes.
+        """
+        visited: set[str] = {start_id}
+        frontier: collections.deque[str] = collections.deque()
+
+        # Seed the frontier with immediate neighbours
+        if direction == "sources":
+            for nid in self.knowledge._doc_to_sources.get(start_id, []):
+                if nid in self.knowledge._id_to_path and nid not in visited:
+                    frontier.append(nid)
+                    visited.add(nid)
+        else:  # "derived"
+            for nid in self.knowledge._source_to_derived.get(start_id, set()):
+                if nid not in visited:
+                    frontier.append(nid)
+                    visited.add(nid)
+
+        current_depth = 1
+        result_ids: list[str] = list(frontier)
+
+        while current_depth < depth and frontier:
+            next_frontier: list[str] = []
+            for node_id in frontier:
+                if direction == "sources":
+                    neighbours = self.knowledge._doc_to_sources.get(node_id, [])
+                    for nid in neighbours:
+                        if nid in self.knowledge._id_to_path and nid not in visited:
+                            next_frontier.append(nid)
+                            visited.add(nid)
+                else:
+                    neighbours = self.knowledge._source_to_derived.get(node_id, set())
+                    for nid in neighbours:
+                        if nid not in visited:
+                            next_frontier.append(nid)
+                            visited.add(nid)
+            frontier = collections.deque(next_frontier)
+            result_ids.extend(next_frontier)
+            current_depth += 1
+
+        # Sort by ID for deterministic output, resolve titles
+        return sorted(
+            [
+                {
+                    "id": nid,
+                    "title": self.knowledge._id_to_title.get(nid, ""),
+                }
+                for nid in result_ids
+            ],
+            key=lambda n: n["id"],
+        )
 
     def start_file_watcher(self) -> None:
         """Start watching for file changes."""
@@ -639,6 +700,74 @@ class LithosServer:
                     "outgoing": [{"id": link.id, "title": link.title} for link in links.outgoing],
                     "incoming": [{"id": link.id, "title": link.title} for link in links.incoming],
                 }
+
+        @self.mcp.tool()
+        async def lithos_provenance(
+            id: str,
+            direction: str = "both",
+            depth: int = 1,
+            include_unresolved: bool = True,
+        ) -> dict[str, Any]:
+            """Query document lineage via provenance indexes.
+
+            Args:
+                id: Document UUID
+                direction: "sources", "derived", or "both"
+                depth: BFS traversal depth 1-3 (default: 1)
+                include_unresolved: Include unresolved source UUIDs (default: True)
+
+            Returns:
+                Dict with id, sources, derived, and optionally unresolved_sources
+            """
+            logger.info("lithos_provenance id=%s direction=%s depth=%d", id, direction, depth)
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.tool.provenance") as span:
+                span.set_attribute("lithos.tool", "lithos_provenance")
+                span.set_attribute("lithos.id", id)
+                span.set_attribute("lithos.direction", direction)
+                span.set_attribute("lithos.depth", depth)
+
+                if id not in self.knowledge._id_to_path:
+                    return {
+                        "status": "error",
+                        "code": "doc_not_found",
+                        "message": f"Document not found: {id}",
+                    }
+
+                if direction not in ("sources", "derived", "both"):
+                    direction = "both"
+
+                depth = min(max(depth, 1), 3)
+
+                sources: list[dict[str, str]] = []
+                derived: list[dict[str, str]] = []
+
+                if direction in ("sources", "both"):
+                    sources = self._bfs_provenance(id, "sources", depth)
+                if direction in ("derived", "both"):
+                    derived = self._bfs_provenance(id, "derived", depth)
+
+                result: dict[str, Any] = {
+                    "id": id,
+                    "sources": sources,
+                    "derived": derived,
+                }
+
+                if include_unresolved:
+                    # Collect unresolved sources for the queried doc
+                    unresolved: set[str] = set()
+                    doc_sources = self.knowledge._doc_to_sources.get(id, [])
+                    for sid in doc_sources:
+                        if (
+                            sid in self.knowledge._unresolved_provenance
+                            or sid not in self.knowledge._id_to_path
+                        ):
+                            unresolved.add(sid)
+                    result["unresolved_sources"] = sorted(unresolved)
+
+                span.set_attribute("lithos.sources_count", len(sources))
+                span.set_attribute("lithos.derived_count", len(derived))
+                return result
 
         @self.mcp.tool()
         async def lithos_tags() -> dict[str, dict[str, int]]:
