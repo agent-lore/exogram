@@ -12,6 +12,7 @@ from lithos.knowledge import (
     generate_slug,
     normalize_url,
     parse_wiki_links,
+    validate_derived_from_ids,
 )
 
 
@@ -1369,3 +1370,97 @@ class TestFindBySourceUrl:
         """Invalid URL returns None (not an exception)."""
         found = await knowledge_manager.find_by_source_url("not-a-url")
         assert found is None
+
+
+class TestValidateDerivedFromIds:
+    """Tests for validate_derived_from_ids()."""
+
+    def test_valid_uuids(self):
+        """Valid lowercase UUIDs are accepted and returned sorted."""
+        ids = [
+            "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+            "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+        ]
+        result = validate_derived_from_ids(ids)
+        assert result == [
+            "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+            "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+        ]
+
+    def test_uppercase_uuids_normalized(self):
+        """Uppercase UUIDs are normalized to lowercase, not rejected."""
+        ids = ["A1B2C3D4-E5F6-4A7B-8C9D-0E1F2A3B4C5D"]
+        result = validate_derived_from_ids(ids)
+        assert result == ["a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"]
+
+    def test_malformed_uuid_rejected(self):
+        """Malformed UUIDs raise ValueError."""
+        with pytest.raises(ValueError, match="Invalid UUID"):
+            validate_derived_from_ids(["not-a-uuid-at-all"])
+
+    def test_wrong_length_uuid_rejected(self):
+        """UUIDs with wrong length are rejected."""
+        with pytest.raises(ValueError, match="Invalid UUID"):
+            validate_derived_from_ids(["a1b2c3d4-e5f6-4a7b-8c9d"])
+
+    def test_non_uuid_title_rejected(self):
+        """Titles (non-UUID strings) are rejected."""
+        with pytest.raises(ValueError, match="Invalid UUID"):
+            validate_derived_from_ids(["My Document Title"])
+
+    def test_non_uuid_slug_rejected(self):
+        """Slugs are rejected."""
+        with pytest.raises(ValueError, match="Invalid UUID"):
+            validate_derived_from_ids(["my-document-slug"])
+
+    def test_non_uuid_path_rejected(self):
+        """File paths are rejected."""
+        with pytest.raises(ValueError, match="Invalid UUID"):
+            validate_derived_from_ids(["/notes/my-doc.md"])
+
+    def test_empty_string_rejected(self):
+        """Empty strings are rejected."""
+        with pytest.raises(ValueError, match="empty or whitespace"):
+            validate_derived_from_ids([""])
+
+    def test_whitespace_only_rejected(self):
+        """Whitespace-only strings are rejected."""
+        with pytest.raises(ValueError, match="empty or whitespace"):
+            validate_derived_from_ids(["   "])
+
+    def test_self_reference_rejected(self):
+        """Self-reference raises ValueError."""
+        self_id = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+        with pytest.raises(ValueError, match="self-reference"):
+            validate_derived_from_ids([self_id], self_id=self_id)
+
+    def test_empty_list_accepted(self):
+        """Empty list is valid and returns empty list."""
+        result = validate_derived_from_ids([])
+        assert result == []
+
+    def test_duplicates_deduplicated(self):
+        """Duplicate UUIDs are deduplicated."""
+        uid = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+        result = validate_derived_from_ids([uid, uid, uid])
+        assert result == [uid]
+
+    def test_whitespace_trimmed(self):
+        """Leading/trailing whitespace is trimmed before validation."""
+        uid = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+        result = validate_derived_from_ids([f"  {uid}  "])
+        assert result == [uid]
+
+    def test_sort_order(self):
+        """Results are sorted by UUID string value."""
+        ids = [
+            "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        ]
+        result = validate_derived_from_ids(ids)
+        assert result == [
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        ]

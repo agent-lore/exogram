@@ -109,6 +109,35 @@ def normalize_url(raw: str) -> str:
     return urlunparse((scheme, netloc, path, "", query, ""))
 
 
+def validate_derived_from_ids(ids: list[str], self_id: str | None = None) -> list[str]:
+    """Validate and normalize a list of derived-from document IDs.
+
+    Returns a deduplicated, sorted list of lowercased UUID strings.
+    Raises ValueError for invalid entries or self-references.
+    """
+    normalized: list[str] = []
+    for raw in ids:
+        if not isinstance(raw, str):
+            raise ValueError(f"derived_from_ids entry must be a string, got {type(raw).__name__}")
+        trimmed = raw.strip()
+        if not trimmed:
+            raise ValueError("derived_from_ids entry must not be empty or whitespace-only")
+        try:
+            parsed = uuid.UUID(trimmed)
+        except ValueError as err:
+            raise ValueError(f"Invalid UUID in derived_from_ids: {trimmed!r}") from err
+        normalized.append(str(parsed))
+
+    result = sorted(set(normalized))
+
+    if self_id is not None:
+        self_normalized = str(uuid.UUID(self_id))
+        if self_normalized in result:
+            raise ValueError(f"derived_from_ids must not contain self-reference: {self_normalized}")
+
+    return result
+
+
 @dataclass
 class KnowledgeMetadata:
     """Document metadata stored in YAML frontmatter."""
