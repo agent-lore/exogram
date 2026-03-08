@@ -698,6 +698,25 @@ class KnowledgeManager:
 
         return doc, truncated
 
+    def _remove_provenance_entries(self, doc_id: str) -> None:
+        """Remove a document's provenance entries from reverse indexes.
+
+        Cleans up _source_to_derived and _unresolved_provenance for the given doc_id
+        based on its current _doc_to_sources entries.
+        """
+        old_sources = self._doc_to_sources.get(doc_id, [])
+        for source_id in old_sources:
+            # Remove from resolved index
+            if source_id in self._source_to_derived:
+                self._source_to_derived[source_id].discard(doc_id)
+                if not self._source_to_derived[source_id]:
+                    del self._source_to_derived[source_id]
+            # Remove from unresolved index
+            if source_id in self._unresolved_provenance:
+                self._unresolved_provenance[source_id].discard(doc_id)
+                if not self._unresolved_provenance[source_id]:
+                    del self._unresolved_provenance[source_id]
+
     @traced("lithos.knowledge.update")
     async def update(
         self,
@@ -708,6 +727,7 @@ class KnowledgeManager:
         tags: list[str] | None = None,
         confidence: float | None = None,
         source_url: str | None | _UnsetType = _UNSET,
+        derived_from_ids: list[str] | None | _UnsetType = _UNSET,
     ) -> WriteResult:
         """Update an existing document.
 
@@ -715,6 +735,11 @@ class KnowledgeManager:
         - _UNSET (default): preserve existing source_url, no map change
         - None: clear existing source_url, remove from map
         - str: normalize, allow if same doc owns it, reject if different doc owns it
+
+        derived_from_ids semantics:
+        - _UNSET (default): preserve existing derived_from_ids, no index change
+        - None or []: clear existing provenance, remove from all provenance indexes
+        - non-empty list: validate, normalize, replace entire set
         """
         async with self._write_lock:
             lithos_metrics.knowledge_ops.add(1, {"op": "update"})
@@ -773,6 +798,44 @@ class KnowledgeManager:
                     doc.metadata.source_url = new_norm
                     self._source_url_to_id[new_norm] = id
 
+            # Handle derived_from_ids update
+            warnings: list[str] = []
+            if not isinstance(derived_from_ids, _UnsetType):
+                if derived_from_ids is None or derived_from_ids == []:
+                    # Clear provenance
+                    self._remove_provenance_entries(id)
+                    doc.metadata.derived_from_ids = []
+                    self._doc_to_sources[id] = []
+                else:
+                    # Replace with new list — validate first
+                    try:
+                        normalized = validate_derived_from_ids(derived_from_ids, self_id=id)
+                    except ValueError as e:
+                        return WriteResult(
+                            status="error",
+                            error_code="invalid_input",
+                            message=str(e),
+                        )
+
+                    # Remove old provenance entries
+                    self._remove_provenance_entries(id)
+
+                    # Add new entries
+                    doc.metadata.derived_from_ids = normalized
+                    self._doc_to_sources[id] = normalized
+                    for source_id in normalized:
+                        if source_id in self._id_to_path:
+                            if source_id not in self._source_to_derived:
+                                self._source_to_derived[source_id] = set()
+                            self._source_to_derived[source_id].add(id)
+                        else:
+                            if source_id not in self._unresolved_provenance:
+                                self._unresolved_provenance[source_id] = set()
+                            self._unresolved_provenance[source_id].add(id)
+                            warnings.append(
+                                f"derived_from_ids contains missing document: {source_id}"
+                            )
+
             # Update fields
             if content is not None:
                 doc.content = content
@@ -801,7 +864,11 @@ class KnowledgeManager:
                     del self._slug_to_id[old_slug]
                 self._slug_to_id[new_slug] = id
 
-            return WriteResult(status="updated", document=doc)
+            # Update _id_to_title if title changed
+            if title is not None:
+                self._id_to_title[id] = title
+
+            return WriteResult(status="updated", document=doc, warnings=warnings)
 
     @traced("lithos.knowledge.delete")
     async def delete(self, id: str) -> tuple[bool, str]:

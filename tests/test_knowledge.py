@@ -2083,3 +2083,198 @@ class TestCreateProvenance:
         assert doc is not None
         assert doc.metadata.derived_from_ids == []
         assert knowledge_manager._doc_to_sources[doc.id] == []
+
+
+class TestUpdateProvenance:
+    """Tests for US-006: Maintain provenance indexes on update."""
+
+    @pytest.mark.asyncio
+    async def test_unset_preserves_provenance(self, knowledge_manager: KnowledgeManager):
+        """_UNSET (default): preserves existing derived_from_ids."""
+        src = (
+            await knowledge_manager.create(title="Source", content="Source.", agent="agent")
+        ).document
+        doc = (
+            await knowledge_manager.create(
+                title="Derived",
+                content="Derived.",
+                agent="agent",
+                derived_from_ids=[src.id],
+            )
+        ).document
+
+        # Update without passing derived_from_ids (default _UNSET)
+        result = await knowledge_manager.update(
+            id=doc.id, agent="editor", content="Updated content."
+        )
+        assert result.status == "updated"
+        assert result.document is not None
+        assert result.document.metadata.derived_from_ids == [src.id]
+        assert knowledge_manager._doc_to_sources[doc.id] == [src.id]
+        assert doc.id in knowledge_manager._source_to_derived[src.id]
+
+    @pytest.mark.asyncio
+    async def test_empty_list_clears_provenance(self, knowledge_manager: KnowledgeManager):
+        """[]: clears existing provenance."""
+        src = (
+            await knowledge_manager.create(title="Source", content="Source.", agent="agent")
+        ).document
+        doc = (
+            await knowledge_manager.create(
+                title="Derived",
+                content="Derived.",
+                agent="agent",
+                derived_from_ids=[src.id],
+            )
+        ).document
+
+        # Clear provenance with empty list
+        result = await knowledge_manager.update(id=doc.id, agent="editor", derived_from_ids=[])
+        assert result.status == "updated"
+        assert result.document is not None
+        assert result.document.metadata.derived_from_ids == []
+        assert knowledge_manager._doc_to_sources[doc.id] == []
+        # src should no longer have doc in _source_to_derived
+        assert src.id not in knowledge_manager._source_to_derived or (
+            doc.id not in knowledge_manager._source_to_derived.get(src.id, set())
+        )
+
+    @pytest.mark.asyncio
+    async def test_none_clears_provenance(self, knowledge_manager: KnowledgeManager):
+        """None: clears existing provenance (same as [])."""
+        src = (
+            await knowledge_manager.create(title="Source", content="Source.", agent="agent")
+        ).document
+        doc = (
+            await knowledge_manager.create(
+                title="Derived",
+                content="Derived.",
+                agent="agent",
+                derived_from_ids=[src.id],
+            )
+        ).document
+
+        result = await knowledge_manager.update(id=doc.id, agent="editor", derived_from_ids=None)
+        assert result.status == "updated"
+        assert result.document is not None
+        assert result.document.metadata.derived_from_ids == []
+        assert knowledge_manager._doc_to_sources[doc.id] == []
+
+    @pytest.mark.asyncio
+    async def test_replace_with_valid_ids(self, knowledge_manager: KnowledgeManager):
+        """Non-empty list: replaces entire provenance set."""
+        src1 = (
+            await knowledge_manager.create(title="Source 1", content="S1.", agent="agent")
+        ).document
+        src2 = (
+            await knowledge_manager.create(title="Source 2", content="S2.", agent="agent")
+        ).document
+        doc = (
+            await knowledge_manager.create(
+                title="Derived",
+                content="Derived.",
+                agent="agent",
+                derived_from_ids=[src1.id],
+            )
+        ).document
+
+        # Replace: src1 -> src2
+        result = await knowledge_manager.update(
+            id=doc.id, agent="editor", derived_from_ids=[src2.id]
+        )
+        assert result.status == "updated"
+        assert result.document is not None
+        assert result.document.metadata.derived_from_ids == [src2.id]
+        assert knowledge_manager._doc_to_sources[doc.id] == [src2.id]
+
+        # src1 should no longer reference doc
+        assert src1.id not in knowledge_manager._source_to_derived or (
+            doc.id not in knowledge_manager._source_to_derived.get(src1.id, set())
+        )
+        # src2 should now reference doc
+        assert doc.id in knowledge_manager._source_to_derived[src2.id]
+
+    @pytest.mark.asyncio
+    async def test_replace_with_unresolved_ids(self, knowledge_manager: KnowledgeManager):
+        """Replace with unresolved IDs produces warnings."""
+        doc = (
+            await knowledge_manager.create(title="Doc", content="Content.", agent="agent")
+        ).document
+        missing_id = "99999999-9999-4999-8999-999999999999"
+
+        result = await knowledge_manager.update(
+            id=doc.id, agent="editor", derived_from_ids=[missing_id]
+        )
+        assert result.status == "updated"
+        assert len(result.warnings) == 1
+        assert missing_id in result.warnings[0]
+        assert knowledge_manager._doc_to_sources[doc.id] == [missing_id]
+        assert doc.id in knowledge_manager._unresolved_provenance[missing_id]
+
+    @pytest.mark.asyncio
+    async def test_self_reference_rejected(self, knowledge_manager: KnowledgeManager):
+        """Self-reference in derived_from_ids returns error."""
+        doc = (
+            await knowledge_manager.create(title="Self Ref", content="Content.", agent="agent")
+        ).document
+
+        result = await knowledge_manager.update(
+            id=doc.id, agent="editor", derived_from_ids=[doc.id]
+        )
+        assert result.status == "error"
+        assert result.error_code == "invalid_input"
+        assert "self-reference" in result.message
+
+    @pytest.mark.asyncio
+    async def test_invalid_uuid_rejected(self, knowledge_manager: KnowledgeManager):
+        """Invalid UUIDs in derived_from_ids returns error."""
+        doc = (
+            await knowledge_manager.create(title="Bad Update", content="Content.", agent="agent")
+        ).document
+
+        result = await knowledge_manager.update(
+            id=doc.id, agent="editor", derived_from_ids=["not-a-uuid"]
+        )
+        assert result.status == "error"
+        assert result.error_code == "invalid_input"
+
+    @pytest.mark.asyncio
+    async def test_update_title_updates_id_to_title(self, knowledge_manager: KnowledgeManager):
+        """Updating title refreshes _id_to_title cache."""
+        doc = (
+            await knowledge_manager.create(title="Old Title", content="Content.", agent="agent")
+        ).document
+        assert knowledge_manager._id_to_title[doc.id] == "Old Title"
+
+        await knowledge_manager.update(id=doc.id, agent="editor", title="New Title")
+        assert knowledge_manager._id_to_title[doc.id] == "New Title"
+
+    @pytest.mark.asyncio
+    async def test_conformance_unset_vs_empty_vs_nonempty(
+        self, knowledge_manager: KnowledgeManager
+    ):
+        """Conformance: _UNSET, []/None, and non-empty list are distinguishable."""
+        from lithos.knowledge import _UNSET
+
+        src1 = (await knowledge_manager.create(title="Src1", content="S1.", agent="agent")).document
+        src2 = (await knowledge_manager.create(title="Src2", content="S2.", agent="agent")).document
+        doc = (
+            await knowledge_manager.create(
+                title="Conformance",
+                content="Content.",
+                agent="agent",
+                derived_from_ids=[src1.id],
+            )
+        ).document
+
+        # _UNSET preserves
+        r1 = await knowledge_manager.update(id=doc.id, agent="e", derived_from_ids=_UNSET)
+        assert r1.document.metadata.derived_from_ids == [src1.id]
+
+        # [] clears
+        r2 = await knowledge_manager.update(id=doc.id, agent="e", derived_from_ids=[])
+        assert r2.document.metadata.derived_from_ids == []
+
+        # non-empty replaces
+        r3 = await knowledge_manager.update(id=doc.id, agent="e", derived_from_ids=[src2.id])
+        assert r3.document.metadata.derived_from_ids == [src2.id]
