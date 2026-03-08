@@ -173,11 +173,31 @@ class LithosServer:
                             self.search.remove_document(doc_id)
                             self.graph.remove_document(doc_id)
                             self.graph.save_cache()
+
+                            try:
+                                await self.event_bus.emit(
+                                    LithosEvent(
+                                        type=NOTE_DELETED,
+                                        payload={"path": str(relative_path)},
+                                    )
+                                )
+                            except Exception:
+                                logger.exception("Failed to emit event for file watcher delete")
                     else:
                         doc, _ = await self.knowledge.read(path=str(relative_path))
                         self.search.index_document(doc)
                         self.graph.add_document(doc)
                         self.graph.save_cache()
+
+                        try:
+                            await self.event_bus.emit(
+                                LithosEvent(
+                                    type=NOTE_UPDATED,
+                                    payload={"path": str(relative_path)},
+                                )
+                            )
+                        except Exception:
+                            logger.exception("Failed to emit event for file watcher change")
                 except Exception as e:
                     logger.error("Error handling file change %s: %s", path, e)
 
