@@ -721,6 +721,127 @@ class TestSourceUrlField:
         assert doc.metadata.source_url is None
 
 
+class TestDerivedFromIdsField:
+    """Tests for derived_from_ids field on KnowledgeMetadata."""
+
+    def test_derived_from_ids_in_known_metadata_keys(self):
+        """derived_from_ids is a recognised metadata key."""
+        from lithos.knowledge import _KNOWN_METADATA_KEYS
+
+        assert "derived_from_ids" in _KNOWN_METADATA_KEYS
+
+    def test_metadata_derived_from_ids_default_empty(self):
+        """derived_from_ids defaults to []."""
+        meta = KnowledgeMetadata(
+            id="test-id",
+            title="Test",
+            author="agent",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        assert meta.derived_from_ids == []
+
+    def test_to_dict_includes_derived_from_ids_when_non_empty(self):
+        """to_dict() includes derived_from_ids when non-empty."""
+        meta = KnowledgeMetadata(
+            id="test-id",
+            title="Test",
+            author="agent",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            derived_from_ids=["aaaa-bbbb-cccc", "dddd-eeee-ffff"],
+        )
+        d = meta.to_dict()
+        assert d["derived_from_ids"] == ["aaaa-bbbb-cccc", "dddd-eeee-ffff"]
+
+    def test_to_dict_omits_derived_from_ids_when_empty(self):
+        """to_dict() omits derived_from_ids when empty list."""
+        meta = KnowledgeMetadata(
+            id="test-id",
+            title="Test",
+            author="agent",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        d = meta.to_dict()
+        assert "derived_from_ids" not in d
+
+    def test_from_dict_reads_derived_from_ids(self):
+        """from_dict() reads derived_from_ids from frontmatter data."""
+        data = {
+            "id": "test-id",
+            "title": "Test",
+            "author": "agent",
+            "derived_from_ids": ["aaaa-bbbb-cccc", "dddd-eeee-ffff"],
+        }
+        meta = KnowledgeMetadata.from_dict(data)
+        assert meta.derived_from_ids == ["aaaa-bbbb-cccc", "dddd-eeee-ffff"]
+
+    def test_from_dict_defaults_derived_from_ids_to_empty(self):
+        """from_dict() defaults derived_from_ids to [] when absent."""
+        data = {"id": "test-id", "title": "Test", "author": "agent"}
+        meta = KnowledgeMetadata.from_dict(data)
+        assert meta.derived_from_ids == []
+
+    @pytest.mark.asyncio
+    async def test_round_trip_with_derived_from_ids(
+        self, knowledge_manager: KnowledgeManager, test_config
+    ):
+        """Write a doc with derived_from_ids, read it back, values match."""
+        import yaml
+
+        source_ids = [
+            "550e8400-e29b-41d4-a716-446655440000",
+            "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+        ]
+        created = (
+            await knowledge_manager.create(
+                title="Derived Doc",
+                content="Has provenance.",
+                agent="agent",
+            )
+        ).document
+
+        # Manually set derived_from_ids and rewrite (create doesn't accept it yet)
+        created.metadata.derived_from_ids = source_ids
+        full_path = test_config.storage.knowledge_path / created.path
+        full_path.write_text(created.to_markdown())
+
+        doc, _ = await knowledge_manager.read(id=created.id)
+        assert doc.metadata.derived_from_ids == source_ids
+
+        # Verify raw frontmatter on disk
+        raw = full_path.read_text()
+        parts = raw.split("---", 2)
+        fm = yaml.safe_load(parts[1])
+        assert fm["derived_from_ids"] == source_ids
+
+    @pytest.mark.asyncio
+    async def test_round_trip_without_derived_from_ids(self, knowledge_manager: KnowledgeManager):
+        """Existing doc without derived_from_ids reads back as []."""
+        created = (
+            await knowledge_manager.create(
+                title="No Provenance",
+                content="No derived_from_ids.",
+                agent="agent",
+            )
+        ).document
+
+        doc, _ = await knowledge_manager.read(id=created.id)
+        assert doc.metadata.derived_from_ids == []
+
+    def test_derived_from_ids_not_in_extra(self):
+        """derived_from_ids is not captured in extra dict."""
+        data = {
+            "id": "test-id",
+            "title": "Test",
+            "author": "agent",
+            "derived_from_ids": ["some-uuid"],
+        }
+        meta = KnowledgeMetadata.from_dict(data)
+        assert "derived_from_ids" not in meta.extra
+
+
 class TestDedupMapAndLock:
     """Tests for US-003: _source_url_to_id map, _write_lock, and _UNSET sentinel."""
 

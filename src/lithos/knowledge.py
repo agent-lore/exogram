@@ -48,6 +48,7 @@ _KNOWN_METADATA_KEYS = frozenset(
         "source",
         "source_url",
         "supersedes",
+        "derived_from_ids",
     }
 )
 
@@ -124,6 +125,7 @@ class KnowledgeMetadata:
     source: str | None = None
     source_url: str | None = None
     supersedes: str | None = None
+    derived_from_ids: list[str] = field(default_factory=list)
     extra: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -148,6 +150,8 @@ class KnowledgeMetadata:
         }
         if self.source_url is not None:
             result["source_url"] = self.source_url
+        if self.derived_from_ids:
+            result["derived_from_ids"] = self.derived_from_ids
         # Merge unknown fields — known keys always take precedence.
         for key, value in self.extra.items():
             if key not in result:
@@ -188,6 +192,7 @@ class KnowledgeMetadata:
             source=data.get("source"),
             source_url=data.get("source_url"),
             supersedes=data.get("supersedes"),
+            derived_from_ids=data.get("derived_from_ids", []),
             extra=extra,
         )
 
