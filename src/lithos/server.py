@@ -14,7 +14,19 @@ from watchdog.observers import Observer
 
 from lithos.config import LithosConfig, get_config, set_config
 from lithos.coordination import CoordinationService
-from lithos.events import EventBus
+from lithos.events import (
+    AGENT_REGISTERED,
+    FINDING_POSTED,
+    NOTE_CREATED,
+    NOTE_DELETED,
+    NOTE_UPDATED,
+    TASK_CLAIMED,
+    TASK_COMPLETED,
+    TASK_CREATED,
+    TASK_RELEASED,
+    EventBus,
+    LithosEvent,
+)
 from lithos.graph import KnowledgeGraph
 from lithos.knowledge import _UNSET, KnowledgeDocument, KnowledgeManager, _UnsetType
 from lithos.search import SearchEngine
@@ -278,6 +290,19 @@ class LithosServer:
                 span.set_attribute("lithos.doc_id", doc.id)
                 span.set_attribute("lithos.write_status", status_label)
                 logger.info("lithos_write completed doc_id=%s status=%s", doc.id, status_label)
+
+                try:
+                    await self.event_bus.emit(
+                        LithosEvent(
+                            type=NOTE_UPDATED if id else NOTE_CREATED,
+                            agent=agent,
+                            payload={"id": doc.id, "title": doc.title, "path": str(doc.path)},
+                            tags=doc.metadata.tags,
+                        )
+                    )
+                except Exception:
+                    logger.exception("Failed to emit event for lithos_write")
+
                 return {
                     "status": status_label,
                     "id": doc.id,
@@ -357,6 +382,17 @@ class LithosServer:
                     self.search.remove_document(id)
                     self.graph.remove_document(id)
                     self.graph.save_cache()
+
+                    try:
+                        await self.event_bus.emit(
+                            LithosEvent(
+                                type=NOTE_DELETED,
+                                agent=agent or "",
+                                payload={"id": id, "path": ""},
+                            )
+                        )
+                    except Exception:
+                        logger.exception("Failed to emit event for lithos_delete")
 
                 return {"success": success}
 
@@ -616,6 +652,19 @@ class LithosServer:
                     metadata=metadata,
                 )
                 span.set_attribute("lithos.created", created)
+
+                if success:
+                    try:
+                        await self.event_bus.emit(
+                            LithosEvent(
+                                type=AGENT_REGISTERED,
+                                agent=id,
+                                payload={"agent_id": id, "name": name or ""},
+                            )
+                        )
+                    except Exception:
+                        logger.exception("Failed to emit event for lithos_agent_register")
+
                 return {"success": success, "created": created}
 
         @self.mcp.tool()
@@ -727,6 +776,18 @@ class LithosServer:
                     tags=tags,
                 )
                 span.set_attribute("lithos.task_id", task_id)
+
+                try:
+                    await self.event_bus.emit(
+                        LithosEvent(
+                            type=TASK_CREATED,
+                            agent=agent,
+                            payload={"task_id": task_id, "title": title},
+                        )
+                    )
+                except Exception:
+                    logger.exception("Failed to emit event for lithos_task_create")
+
                 return {"task_id": task_id}
 
         @self.mcp.tool()
@@ -761,6 +822,19 @@ class LithosServer:
                     ttl_minutes=ttl_minutes,
                 )
                 span.set_attribute("lithos.success", success)
+
+                if success:
+                    try:
+                        await self.event_bus.emit(
+                            LithosEvent(
+                                type=TASK_CLAIMED,
+                                agent=agent,
+                                payload={"task_id": task_id, "agent": agent, "aspect": aspect},
+                            )
+                        )
+                    except Exception:
+                        logger.exception("Failed to emit event for lithos_task_claim")
+
                 return {
                     "success": success,
                     "expires_at": expires_at.isoformat() if expires_at else None,
@@ -832,6 +906,19 @@ class LithosServer:
                     agent=agent,
                 )
                 span.set_attribute("lithos.success", success)
+
+                if success:
+                    try:
+                        await self.event_bus.emit(
+                            LithosEvent(
+                                type=TASK_RELEASED,
+                                agent=agent,
+                                payload={"task_id": task_id, "agent": agent, "aspect": aspect},
+                            )
+                        )
+                    except Exception:
+                        logger.exception("Failed to emit event for lithos_task_release")
+
                 return {"success": success}
 
         @self.mcp.tool()
@@ -859,6 +946,19 @@ class LithosServer:
                     agent=agent,
                 )
                 span.set_attribute("lithos.success", success)
+
+                if success:
+                    try:
+                        await self.event_bus.emit(
+                            LithosEvent(
+                                type=TASK_COMPLETED,
+                                agent=agent,
+                                payload={"task_id": task_id, "agent": agent},
+                            )
+                        )
+                    except Exception:
+                        logger.exception("Failed to emit event for lithos_task_complete")
+
                 return {"success": success}
 
         @self.mcp.tool()
@@ -932,6 +1032,22 @@ class LithosServer:
                     knowledge_id=knowledge_id,
                 )
                 span.set_attribute("lithos.finding_id", finding_id)
+
+                try:
+                    await self.event_bus.emit(
+                        LithosEvent(
+                            type=FINDING_POSTED,
+                            agent=agent,
+                            payload={
+                                "finding_id": finding_id,
+                                "task_id": task_id,
+                                "agent": agent,
+                            },
+                        )
+                    )
+                except Exception:
+                    logger.exception("Failed to emit event for lithos_finding_post")
+
                 return {"finding_id": finding_id}
 
         @self.mcp.tool()
