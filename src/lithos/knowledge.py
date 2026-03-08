@@ -522,6 +522,7 @@ class KnowledgeManager:
         path: str | None = None,
         source: str | None = None,
         source_url: str | None = None,
+        derived_from_ids: list[str] | None = None,
     ) -> WriteResult:
         """Create a new knowledge document.
 
@@ -560,6 +561,18 @@ class KnowledgeManager:
                         # Stale map entry; allow create
                         del self._source_url_to_id[norm_url]
 
+            # Validate and normalize derived_from_ids
+            normalized_provenance: list[str] = []
+            if derived_from_ids:
+                try:
+                    normalized_provenance = validate_derived_from_ids(derived_from_ids)
+                except ValueError as e:
+                    return WriteResult(
+                        status="error",
+                        error_code="invalid_input",
+                        message=str(e),
+                    )
+
             doc_id = str(uuid.uuid4())
             now = datetime.now(timezone.utc)
 
@@ -574,6 +587,7 @@ class KnowledgeManager:
                 contributors=[],
                 source=source,
                 source_url=norm_url,
+                derived_from_ids=normalized_provenance,
             )
 
             # Determine file path
@@ -603,7 +617,31 @@ class KnowledgeManager:
             if norm_url is not None:
                 self._source_url_to_id[norm_url] = doc_id
 
-            return WriteResult(status="created", document=doc)
+            # Update provenance indexes
+            warnings: list[str] = []
+            self._doc_to_sources[doc_id] = normalized_provenance
+            self._id_to_title[doc_id] = title
+            for source_id in normalized_provenance:
+                if source_id in self._id_to_path:
+                    # Resolved: source document exists
+                    if source_id not in self._source_to_derived:
+                        self._source_to_derived[source_id] = set()
+                    self._source_to_derived[source_id].add(doc_id)
+                else:
+                    # Unresolved: source document not found
+                    if source_id not in self._unresolved_provenance:
+                        self._unresolved_provenance[source_id] = set()
+                    self._unresolved_provenance[source_id].add(doc_id)
+                    warnings.append(f"derived_from_ids contains missing document: {source_id}")
+
+            # Auto-resolve: check if any existing docs had unresolved refs to this new doc
+            if doc_id in self._unresolved_provenance:
+                resolved_docs = self._unresolved_provenance.pop(doc_id)
+                if doc_id not in self._source_to_derived:
+                    self._source_to_derived[doc_id] = set()
+                self._source_to_derived[doc_id].update(resolved_docs)
+
+            return WriteResult(status="created", document=doc, warnings=warnings)
 
     @traced("lithos.knowledge.read")
     async def read(
