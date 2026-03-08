@@ -1464,3 +1464,294 @@ class TestValidateDerivedFromIds:
             "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
             "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
         ]
+
+
+class TestProvenanceIndexes:
+    """Tests for US-004: Provenance indexes and two-pass startup scan."""
+
+    def test_init_has_provenance_indexes(self, knowledge_manager: KnowledgeManager):
+        """KnowledgeManager initializes all four provenance indexes."""
+        assert isinstance(knowledge_manager._doc_to_sources, dict)
+        assert isinstance(knowledge_manager._source_to_derived, dict)
+        assert isinstance(knowledge_manager._unresolved_provenance, dict)
+        assert isinstance(knowledge_manager._id_to_title, dict)
+
+    @pytest.mark.asyncio
+    async def test_scan_builds_provenance_indexes(self, test_config):
+        """After scanning docs with provenance, all three indexes are correct."""
+        import frontmatter as fm
+
+        kp = test_config.storage.knowledge_path
+
+        # Create source doc A
+        id_a = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        post_a = fm.Post(
+            "# Source A\n\nContent of source A.",
+            id=id_a,
+            title="Source A",
+            author="agent",
+            created_at="2026-01-01T00:00:00+00:00",
+            updated_at="2026-01-01T00:00:00+00:00",
+            tags=[],
+            aliases=[],
+            confidence=1.0,
+            contributors=[],
+            source=None,
+            supersedes=None,
+        )
+        (kp / "source-a.md").write_text(fm.dumps(post_a))
+
+        # Create source doc B
+        id_b = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        post_b = fm.Post(
+            "# Source B\n\nContent of source B.",
+            id=id_b,
+            title="Source B",
+            author="agent",
+            created_at="2026-01-01T00:00:00+00:00",
+            updated_at="2026-01-01T00:00:00+00:00",
+            tags=[],
+            aliases=[],
+            confidence=1.0,
+            contributors=[],
+            source=None,
+            supersedes=None,
+        )
+        (kp / "source-b.md").write_text(fm.dumps(post_b))
+
+        # Create derived doc C that derives from A and B
+        id_c = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+        post_c = fm.Post(
+            "# Derived C\n\nDerived from A and B.",
+            id=id_c,
+            title="Derived C",
+            author="agent",
+            created_at="2026-01-01T00:00:00+00:00",
+            updated_at="2026-01-01T00:00:00+00:00",
+            tags=[],
+            aliases=[],
+            confidence=1.0,
+            contributors=[],
+            source=None,
+            supersedes=None,
+            derived_from_ids=[id_a, id_b],
+        )
+        (kp / "derived-c.md").write_text(fm.dumps(post_c))
+
+        mgr = KnowledgeManager()
+
+        # _doc_to_sources: C -> [A, B]; A -> []; B -> []
+        assert mgr._doc_to_sources[id_c] == [id_a, id_b]
+        assert mgr._doc_to_sources[id_a] == []
+        assert mgr._doc_to_sources[id_b] == []
+
+        # _source_to_derived: A -> {C}, B -> {C}
+        assert mgr._source_to_derived[id_a] == {id_c}
+        assert mgr._source_to_derived[id_b] == {id_c}
+
+        # No unresolved provenance (all sources exist)
+        assert len(mgr._unresolved_provenance) == 0
+
+        # _id_to_title populated
+        assert mgr._id_to_title[id_a] == "Source A"
+        assert mgr._id_to_title[id_b] == "Source B"
+        assert mgr._id_to_title[id_c] == "Derived C"
+
+    @pytest.mark.asyncio
+    async def test_scan_forward_references(self, test_config):
+        """Forward references (B created after A, but A references B) are resolved."""
+        import frontmatter as fm
+
+        kp = test_config.storage.knowledge_path
+
+        id_a = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        id_b = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+
+        # Doc A references B, but "a" sorts before "b" alphabetically.
+        # This tests that pass 2 resolves references regardless of file order.
+        post_a = fm.Post(
+            "# Doc A\n\nDerived from B.",
+            id=id_a,
+            title="Doc A",
+            author="agent",
+            created_at="2026-01-01T00:00:00+00:00",
+            updated_at="2026-01-01T00:00:00+00:00",
+            tags=[],
+            aliases=[],
+            confidence=1.0,
+            contributors=[],
+            source=None,
+            supersedes=None,
+            derived_from_ids=[id_b],
+        )
+        (kp / "doc-a.md").write_text(fm.dumps(post_a))
+
+        post_b = fm.Post(
+            "# Doc B\n\nSource document.",
+            id=id_b,
+            title="Doc B",
+            author="agent",
+            created_at="2026-01-01T00:00:00+00:00",
+            updated_at="2026-01-01T00:00:00+00:00",
+            tags=[],
+            aliases=[],
+            confidence=1.0,
+            contributors=[],
+            source=None,
+            supersedes=None,
+        )
+        (kp / "doc-b.md").write_text(fm.dumps(post_b))
+
+        mgr = KnowledgeManager()
+
+        # A references B — B exists, so it's resolved
+        assert mgr._doc_to_sources[id_a] == [id_b]
+        assert mgr._source_to_derived[id_b] == {id_a}
+        assert len(mgr._unresolved_provenance) == 0
+
+    @pytest.mark.asyncio
+    async def test_scan_unresolved_references(self, test_config):
+        """References to non-existent docs are classified as unresolved."""
+        import frontmatter as fm
+
+        kp = test_config.storage.knowledge_path
+
+        id_a = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        missing_id = "99999999-9999-4999-8999-999999999999"
+
+        post_a = fm.Post(
+            "# Doc A\n\nDerived from missing doc.",
+            id=id_a,
+            title="Doc A",
+            author="agent",
+            created_at="2026-01-01T00:00:00+00:00",
+            updated_at="2026-01-01T00:00:00+00:00",
+            tags=[],
+            aliases=[],
+            confidence=1.0,
+            contributors=[],
+            source=None,
+            supersedes=None,
+            derived_from_ids=[missing_id],
+        )
+        (kp / "doc-a.md").write_text(fm.dumps(post_a))
+
+        mgr = KnowledgeManager()
+
+        assert mgr._doc_to_sources[id_a] == [missing_id]
+        assert missing_id not in mgr._source_to_derived
+        assert mgr._unresolved_provenance[missing_id] == {id_a}
+
+    @pytest.mark.asyncio
+    async def test_repeated_scan_produces_identical_state(self, test_config):
+        """Repeated _scan_existing() calls produce identical index state."""
+        import frontmatter as fm
+
+        kp = test_config.storage.knowledge_path
+
+        id_a = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        id_b = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        missing_id = "99999999-9999-4999-8999-999999999999"
+
+        post_a = fm.Post(
+            "# Source A\n\nSource.",
+            id=id_a,
+            title="Source A",
+            author="agent",
+            created_at="2026-01-01T00:00:00+00:00",
+            updated_at="2026-01-01T00:00:00+00:00",
+            tags=[],
+            aliases=[],
+            confidence=1.0,
+            contributors=[],
+            source=None,
+            supersedes=None,
+        )
+        (kp / "source-a.md").write_text(fm.dumps(post_a))
+
+        post_b = fm.Post(
+            "# Derived B\n\nDerived from A and missing.",
+            id=id_b,
+            title="Derived B",
+            author="agent",
+            created_at="2026-01-01T00:00:00+00:00",
+            updated_at="2026-01-01T00:00:00+00:00",
+            tags=[],
+            aliases=[],
+            confidence=1.0,
+            contributors=[],
+            source=None,
+            supersedes=None,
+            derived_from_ids=[id_a, missing_id],
+        )
+        (kp / "derived-b.md").write_text(fm.dumps(post_b))
+
+        mgr = KnowledgeManager()
+
+        # Capture state after first scan
+        doc_to_sources_1 = dict(mgr._doc_to_sources)
+        source_to_derived_1 = {k: set(v) for k, v in mgr._source_to_derived.items()}
+        unresolved_1 = {k: set(v) for k, v in mgr._unresolved_provenance.items()}
+        id_to_title_1 = dict(mgr._id_to_title)
+
+        # Run scan again
+        mgr._scan_existing()
+
+        # State should be identical
+        assert mgr._doc_to_sources == doc_to_sources_1
+        assert {k: set(v) for k, v in mgr._source_to_derived.items()} == source_to_derived_1
+        assert {k: set(v) for k, v in mgr._unresolved_provenance.items()} == unresolved_1
+        assert mgr._id_to_title == id_to_title_1
+
+    @pytest.mark.asyncio
+    async def test_scan_no_provenance_has_empty_indexes(self, test_config):
+        """Docs without provenance have empty _doc_to_sources entries."""
+        mgr = KnowledgeManager()
+        result = await mgr.create(
+            title="Simple Doc",
+            content="No provenance.",
+            agent="agent",
+        )
+        doc = result.document
+        assert doc is not None
+
+        # Re-scan from disk
+        mgr2 = KnowledgeManager()
+        assert mgr2._doc_to_sources[doc.id] == []
+        assert len(mgr2._source_to_derived) == 0
+        assert len(mgr2._unresolved_provenance) == 0
+
+    @pytest.mark.asyncio
+    async def test_scan_clears_stale_indexes(self, test_config):
+        """_scan_existing() clears indexes before rebuilding."""
+        import frontmatter as fm
+
+        kp = test_config.storage.knowledge_path
+
+        id_a = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        post_a = fm.Post(
+            "# Doc A\n\nContent.",
+            id=id_a,
+            title="Doc A",
+            author="agent",
+            created_at="2026-01-01T00:00:00+00:00",
+            updated_at="2026-01-01T00:00:00+00:00",
+            tags=[],
+            aliases=[],
+            confidence=1.0,
+            contributors=[],
+            source=None,
+            supersedes=None,
+        )
+        (kp / "doc-a.md").write_text(fm.dumps(post_a))
+
+        mgr = KnowledgeManager()
+        assert id_a in mgr._id_to_title
+
+        # Remove file and re-scan — stale entry should be gone
+        (kp / "doc-a.md").unlink()
+        mgr._scan_existing()
+
+        assert id_a not in mgr._id_to_title
+        assert id_a not in mgr._doc_to_sources
+        assert id_a not in mgr._id_to_path

@@ -390,10 +390,29 @@ class KnowledgeManager:
         self._source_url_to_id: dict[str, str] = {}
         self._write_lock = asyncio.Lock()
         self.duplicate_url_count: int = 0
+        # Provenance indexes
+        self._doc_to_sources: dict[str, list[str]] = {}
+        self._source_to_derived: dict[str, set[str]] = {}
+        self._unresolved_provenance: dict[str, set[str]] = {}
+        self._id_to_title: dict[str, str] = {}
         self._scan_existing()
 
     def _scan_existing(self) -> None:
-        """Scan existing documents and build indices."""
+        """Scan existing documents and build indices.
+
+        Uses a two-pass approach:
+        - Pass 1: Walk files, populate core indexes and collect provenance pairs.
+        - Pass 2: Classify provenance references as resolved or unresolved.
+        """
+        # Clear all indexes before rebuilding (prevents stale accumulation).
+        self._id_to_path.clear()
+        self._slug_to_id.clear()
+        self._source_url_to_id.clear()
+        self._doc_to_sources.clear()
+        self._source_to_derived.clear()
+        self._unresolved_provenance.clear()
+        self._id_to_title.clear()
+
         if not self.knowledge_path.exists():
             return
 
@@ -408,6 +427,9 @@ class KnowledgeManager:
         candidates.sort(key=lambda t: t[0])
         collisions: list[tuple[str, str, str]] = []  # (norm_url, first_id, dup_id)
 
+        # Pass 1: Walk files, populate core indexes, collect provenance.
+        deferred_provenance: list[tuple[str, list[str]]] = []
+
         for rel_path, md_file in candidates:
             try:
                 post = frontmatter.load(str(md_file))
@@ -417,6 +439,7 @@ class KnowledgeManager:
                     self._id_to_path[doc_id] = rel_path
                     if title:
                         self._slug_to_id[slugify(title)] = doc_id
+                        self._id_to_title[doc_id] = title
 
                     # Populate source_url -> id map
                     raw_url: str | None = post.metadata.get("source_url")  # type: ignore[assignment]
@@ -430,8 +453,39 @@ class KnowledgeManager:
                                 collisions.append((norm, existing_id, doc_id))
                         except ValueError:
                             pass  # Skip invalid URLs on load
+
+                    # Collect derived_from_ids for pass 2
+                    derived_from: list[str] = post.metadata.get("derived_from_ids", [])  # type: ignore[assignment]
+                    if isinstance(derived_from, list):
+                        deferred_provenance.append((doc_id, derived_from))
+                    else:
+                        deferred_provenance.append((doc_id, []))
             except Exception:
                 pass  # Skip invalid files
+
+        # Pass 2: Classify provenance references as resolved or unresolved.
+        for doc_id, source_ids in deferred_provenance:
+            self._doc_to_sources[doc_id] = list(source_ids)
+            for source_id in source_ids:
+                if source_id in self._id_to_path:
+                    # Resolved: source document exists
+                    if source_id not in self._source_to_derived:
+                        self._source_to_derived[source_id] = set()
+                    self._source_to_derived[source_id].add(doc_id)
+                else:
+                    # Unresolved: source document not found
+                    if source_id not in self._unresolved_provenance:
+                        self._unresolved_provenance[source_id] = set()
+                    self._unresolved_provenance[source_id].add(doc_id)
+
+        resolved_count = sum(len(v) for v in self._source_to_derived.values())
+        unresolved_count = sum(len(v) for v in self._unresolved_provenance.values())
+        if resolved_count or unresolved_count:
+            logger.info(
+                "Provenance scan: %d resolved references, %d unresolved references",
+                resolved_count,
+                unresolved_count,
+            )
 
         # Report collisions deterministically (sorted by normalized URL).
         if collisions:
