@@ -77,6 +77,13 @@ class LithosServer:
         """Get configuration."""
         return self._config
 
+    async def _emit(self, event: LithosEvent) -> None:
+        """Emit an event, logging any failure without propagating."""
+        try:
+            await self.event_bus.emit(event)
+        except Exception:
+            logger.exception("Failed to emit %s event", event.type)
+
     async def initialize(self) -> None:
         """Initialize all components."""
         # Ensure directories exist
@@ -174,30 +181,24 @@ class LithosServer:
                             self.graph.remove_document(doc_id)
                             self.graph.save_cache()
 
-                            try:
-                                await self.event_bus.emit(
-                                    LithosEvent(
-                                        type=NOTE_DELETED,
-                                        payload={"path": str(relative_path)},
-                                    )
+                            await self._emit(
+                                LithosEvent(
+                                    type=NOTE_DELETED,
+                                    payload={"path": str(relative_path)},
                                 )
-                            except Exception:
-                                logger.exception("Failed to emit event for file watcher delete")
+                            )
                     else:
                         doc, _ = await self.knowledge.read(path=str(relative_path))
                         self.search.index_document(doc)
                         self.graph.add_document(doc)
                         self.graph.save_cache()
 
-                        try:
-                            await self.event_bus.emit(
-                                LithosEvent(
-                                    type=NOTE_UPDATED,
-                                    payload={"path": str(relative_path)},
-                                )
+                        await self._emit(
+                            LithosEvent(
+                                type=NOTE_UPDATED,
+                                payload={"path": str(relative_path)},
                             )
-                        except Exception:
-                            logger.exception("Failed to emit event for file watcher change")
+                        )
                 except Exception as e:
                     logger.error("Error handling file change %s: %s", path, e)
 
@@ -311,17 +312,14 @@ class LithosServer:
                 span.set_attribute("lithos.write_status", status_label)
                 logger.info("lithos_write completed doc_id=%s status=%s", doc.id, status_label)
 
-                try:
-                    await self.event_bus.emit(
-                        LithosEvent(
-                            type=NOTE_UPDATED if id else NOTE_CREATED,
-                            agent=agent,
-                            payload={"id": doc.id, "title": doc.title, "path": str(doc.path)},
-                            tags=doc.metadata.tags,
-                        )
+                await self._emit(
+                    LithosEvent(
+                        type=NOTE_UPDATED if id else NOTE_CREATED,
+                        agent=agent,
+                        payload={"id": doc.id, "title": doc.title, "path": str(doc.path)},
+                        tags=doc.metadata.tags,
                     )
-                except Exception:
-                    logger.exception("Failed to emit event for lithos_write")
+                )
 
                 return {
                     "status": status_label,
@@ -403,16 +401,13 @@ class LithosServer:
                     self.graph.remove_document(id)
                     self.graph.save_cache()
 
-                    try:
-                        await self.event_bus.emit(
-                            LithosEvent(
-                                type=NOTE_DELETED,
-                                agent=agent or "",
-                                payload={"id": id, "path": path},
-                            )
+                    await self._emit(
+                        LithosEvent(
+                            type=NOTE_DELETED,
+                            agent=agent or "",
+                            payload={"id": id, "path": path},
                         )
-                    except Exception:
-                        logger.exception("Failed to emit event for lithos_delete")
+                    )
 
                 return {"success": success}
 
@@ -674,16 +669,13 @@ class LithosServer:
                 span.set_attribute("lithos.created", created)
 
                 if success:
-                    try:
-                        await self.event_bus.emit(
-                            LithosEvent(
-                                type=AGENT_REGISTERED,
-                                agent=id,
-                                payload={"agent_id": id, "name": name or ""},
-                            )
+                    await self._emit(
+                        LithosEvent(
+                            type=AGENT_REGISTERED,
+                            agent=id,
+                            payload={"agent_id": id, "name": name or ""},
                         )
-                    except Exception:
-                        logger.exception("Failed to emit event for lithos_agent_register")
+                    )
 
                 return {"success": success, "created": created}
 
@@ -797,16 +789,13 @@ class LithosServer:
                 )
                 span.set_attribute("lithos.task_id", task_id)
 
-                try:
-                    await self.event_bus.emit(
-                        LithosEvent(
-                            type=TASK_CREATED,
-                            agent=agent,
-                            payload={"task_id": task_id, "title": title},
-                        )
+                await self._emit(
+                    LithosEvent(
+                        type=TASK_CREATED,
+                        agent=agent,
+                        payload={"task_id": task_id, "title": title},
                     )
-                except Exception:
-                    logger.exception("Failed to emit event for lithos_task_create")
+                )
 
                 return {"task_id": task_id}
 
@@ -844,16 +833,13 @@ class LithosServer:
                 span.set_attribute("lithos.success", success)
 
                 if success:
-                    try:
-                        await self.event_bus.emit(
-                            LithosEvent(
-                                type=TASK_CLAIMED,
-                                agent=agent,
-                                payload={"task_id": task_id, "agent": agent, "aspect": aspect},
-                            )
+                    await self._emit(
+                        LithosEvent(
+                            type=TASK_CLAIMED,
+                            agent=agent,
+                            payload={"task_id": task_id, "agent": agent, "aspect": aspect},
                         )
-                    except Exception:
-                        logger.exception("Failed to emit event for lithos_task_claim")
+                    )
 
                 return {
                     "success": success,
@@ -928,16 +914,13 @@ class LithosServer:
                 span.set_attribute("lithos.success", success)
 
                 if success:
-                    try:
-                        await self.event_bus.emit(
-                            LithosEvent(
-                                type=TASK_RELEASED,
-                                agent=agent,
-                                payload={"task_id": task_id, "agent": agent, "aspect": aspect},
-                            )
+                    await self._emit(
+                        LithosEvent(
+                            type=TASK_RELEASED,
+                            agent=agent,
+                            payload={"task_id": task_id, "agent": agent, "aspect": aspect},
                         )
-                    except Exception:
-                        logger.exception("Failed to emit event for lithos_task_release")
+                    )
 
                 return {"success": success}
 
@@ -968,16 +951,13 @@ class LithosServer:
                 span.set_attribute("lithos.success", success)
 
                 if success:
-                    try:
-                        await self.event_bus.emit(
-                            LithosEvent(
-                                type=TASK_COMPLETED,
-                                agent=agent,
-                                payload={"task_id": task_id, "agent": agent},
-                            )
+                    await self._emit(
+                        LithosEvent(
+                            type=TASK_COMPLETED,
+                            agent=agent,
+                            payload={"task_id": task_id, "agent": agent},
                         )
-                    except Exception:
-                        logger.exception("Failed to emit event for lithos_task_complete")
+                    )
 
                 return {"success": success}
 
@@ -1053,20 +1033,17 @@ class LithosServer:
                 )
                 span.set_attribute("lithos.finding_id", finding_id)
 
-                try:
-                    await self.event_bus.emit(
-                        LithosEvent(
-                            type=FINDING_POSTED,
-                            agent=agent,
-                            payload={
-                                "finding_id": finding_id,
-                                "task_id": task_id,
-                                "agent": agent,
-                            },
-                        )
+                await self._emit(
+                    LithosEvent(
+                        type=FINDING_POSTED,
+                        agent=agent,
+                        payload={
+                            "finding_id": finding_id,
+                            "task_id": task_id,
+                            "agent": agent,
+                        },
                     )
-                except Exception:
-                    logger.exception("Failed to emit event for lithos_finding_post")
+                )
 
                 return {"finding_id": finding_id}
 
