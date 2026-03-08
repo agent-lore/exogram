@@ -112,6 +112,7 @@ class LithosConfig(BaseSettings):
     coordination: CoordinationConfig = Field(default_factory=CoordinationConfig)
     index: IndexConfig = Field(default_factory=IndexConfig)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
+    events: EventsConfig = Field(default_factory=EventsConfig)
 
     @classmethod
     def from_yaml(cls, path: Path) -> "LithosConfig":
