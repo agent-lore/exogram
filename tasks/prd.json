@@ -193,7 +193,7 @@
         "Pyright type check passes"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "See server.py lines 108-155 for _rebuild_indices(). It currently iterates docs and calls search.index_document() and graph.add_document(). Since _scan_existing() already builds provenance indexes (US-004), and _rebuild_indices() calls knowledge scan paths, this may already work. Verify and add explicit test."
     },
     {
@@ -222,7 +222,7 @@
         "Pyright type check passes"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": "Register via @self.mcp.tool() inside _register_tools(). BFS implementation: use collections.deque for the frontier, set for visited. For direction='sources' walk _doc_to_sources; for 'derived' walk _source_to_derived. At each depth level, expand all current-level nodes before incrementing depth. Clamp depth with min(max(depth, 1), 3). Sort final lists by node ID."
     },
     {
@@ -242,7 +242,7 @@
         "Pyright type check passes"
       ],
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "notes": "For lithos_read (server.py ~line 362): add meta['derived_from_ids'] = doc.metadata.derived_from_ids similar to how source_url is added. For lithos_search/semantic (server.py ~lines 455-523): look up self.knowledge._doc_to_sources.get(r.id, []) for each result. For lithos_list (server.py ~lines 568-581): use d.metadata.derived_from_ids directly."
     },
     {
@@ -257,7 +257,7 @@
         "Pyright type check passes"
       ],
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "notes": "Follow existing tool handler span pattern in server.py — e.g., tracer = get_tracer(); with tracer.start_as_current_span('lithos.provenance') as span. For scan stats, a logger.info with resolved/unresolved counts is sufficient."
     },
     {
@@ -286,7 +286,7 @@
         "Pyright type check passes"
       ],
       "priority": 14,
-      "passes": false,
+      "passes": true,
       "notes": "Create tests/test_provenance_conformance.py. This is the cross-cutting conformance suite from final-architecture-guardrails.md section 7. Tests should exercise both manager-level and MCP-tool-level paths. Use the existing test_config fixture for temp directories."
     },
     {

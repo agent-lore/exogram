@@ -16,6 +16,9 @@
 - `to_dict()` omits empty `derived_from_ids` — integration tests checking cleared provenance should use `.get("derived_from_ids", [])` not direct key access
 - `sync_from_disk(path)` is the manager-owned API for external file changes — handles new + modified uniformly, updates all indexes including provenance, auto-resolves unresolved refs
 - `handle_file_change` in server.py: delete → `manager.delete()`, non-delete → `manager.sync_from_disk()` then pass doc to search/graph
+- `_rebuild_indices()` must call `self.knowledge._scan_existing()` to rebuild provenance indexes alongside search/graph
+- `lithos_provenance` BFS: "sources" walks `_doc_to_sources`, "derived" walks `_source_to_derived`; `_bfs_provenance()` helper on `LithosServer`
+- Ruff SIM114: combine `if`/`elif` branches that do the same action using `or`
 
 ---
 
@@ -136,4 +139,70 @@
   - Ruff SIM102: nested `if` statements should be combined with `and` — catch early
   - The `_source_url_to_id` cleanup on sync needs to scan for old mappings by doc_id since we don't cache the old normalized URL
   - Auto-resolve in `sync_from_disk` is the primary path for resolving unresolved provenance (vs `create()` which mints random UUIDs)
+---
+
+## 2026-03-08 - US-010
+- Added `self.knowledge._scan_existing()` call to `_rebuild_indices()` in server.py — ensures provenance indexes are rebuilt from on-disk state alongside search and graph indexes
+- 3 integration tests in `TestRebuildIndicesProvenance` class covering: restore provenance after rebuild, detect unresolved provenance after rebuild, clear stale provenance after rebuild (deleted-on-disk doc)
+- Files changed: `src/lithos/server.py`, `tests/test_integration_conformance.py`
+- **Learnings for future iterations:**
+  - `_rebuild_indices()` must rebuild ALL index types — search, graph, AND provenance
+  - `_scan_existing()` already clears + rebuilds provenance indexes, so a single call is sufficient
+  - To test stale cleanup: delete a file from disk directly (`full_path.unlink()`) then call `_rebuild_indices()` — the doc should disappear from all indexes
+---
+
+## 2026-03-08 - US-011
+- Added `lithos_provenance` MCP tool with BFS traversal over provenance indexes
+- Added `_bfs_provenance()` helper method on `LithosServer` for BFS with visited-set cycle protection
+- Supports `direction`: "sources", "derived", "both"; `depth` clamped 1-3; `include_unresolved` flag
+- BFS uses `collections.deque` frontier with depth-level expansion
+- Results sorted by ID for deterministic output; titles resolved from `_id_to_title` cache
+- Unknown ID returns `{"status": "error", "code": "doc_not_found", ...}`
+- OTEL span `lithos.tool.provenance` with `sources_count` and `derived_count` attributes
+- 10 integration tests in `TestLithosProvenance` class covering: single-depth sources, single-depth derived, multi-depth BFS chain, cycle handling, unresolved included/excluded, unknown ID error, both direction, sorted output, depth clamping
+- Files changed: `src/lithos/server.py`, `tests/test_integration_conformance.py`
+- **Learnings for future iterations:**
+  - BFS for "sources" walks `_doc_to_sources` (forward), for "derived" walks `_source_to_derived` (reverse) — only follow resolved nodes (check `_id_to_path`)
+  - Ruff SIM114: combine `if` branches with `or` when both do the same action
+  - `ruff format` may need to run after adding methods — auto-formatting adjusts line wrapping
+  - Cycle test: update doc A to derive from B after B already derives from A, then verify BFS terminates
+---
+
+## 2026-03-08 - US-012
+- Added `derived_from_ids` to four tool responses: `lithos_read` (metadata dict), `lithos_search` (result items), `lithos_semantic` (result items), `lithos_list` (items)
+- For `lithos_read` and `lithos_list`: uses already-loaded document metadata (no extra I/O)
+- For `lithos_search` and `lithos_semantic`: resolves from `_doc_to_sources` in-memory index — avoids N+1 file reads on hot search paths
+- 3 integration tests in `TestDerivedFromIdsInResponses` class covering: read includes derived_from_ids, search includes derived_from_ids, list includes derived_from_ids
+- Files changed: `src/lithos/server.py`, `tests/test_integration_conformance.py`
+- **Learnings for future iterations:**
+  - For search/semantic responses, use `self.knowledge._doc_to_sources.get(r.id, [])` — the in-memory index is the canonical source for provenance on search paths
+  - For read/list responses, use `doc.metadata.derived_from_ids` directly since the doc is already loaded
+  - `ruff format` may reformat long dict comprehension lines — run format after edits
+---
+
+## 2026-03-08 - US-013
+- Added `lithos.provenance.source_count` and `lithos.provenance.warning_count` span attributes to the write path (`lithos.tool.write` span)
+- Verified `lithos_provenance` tool already emits `lithos.tool.provenance` span with `sources_count` and `derived_count` (from US-011)
+- Verified `_scan_existing()` already logs resolved/unresolved counts (from US-004)
+- No raw content or full ID lists in span attributes — only counts, per guardrails
+- Added `_extract_id()` helper in test_telemetry.py for robust MCP result parsing
+- 2 integration tests in `TestTelemetryIntegration` class: write with provenance records span attributes, provenance tool emits span
+- Files changed: `src/lithos/server.py`, `tests/test_telemetry.py`
+- **Learnings for future iterations:**
+  - `_call_tool_mcp` result format varies: use tuple check first, then content-list check — the `_extract_id()` helper handles both
+  - Ruff I001: import blocks must be sorted — `from typing import Any` goes with stdlib before third-party
+  - OTEL span attributes should use counts, not raw data, per guardrails sensitive-data policy
+---
+
+## 2026-03-08 - US-014
+- Created `tests/test_provenance_conformance.py` — 19 conformance tests across 6 test classes
+- Classes: `TestCreateConformance` (3), `TestUpdateConformance` (4), `TestValidationConformance` (3), `TestIndexLifecycleConformance` (3), `TestWriteContractConformance` (3), `TestScanConformance` (3)
+- Tests exercise both manager-level and MCP-tool-level paths
+- `_call_tool()` helper wraps `_call_tool_mcp` for convenient JSON result extraction
+- Files changed: `tests/test_provenance_conformance.py` (new)
+- **Learnings for future iterations:**
+  - Ruff RUF034: don't use useless if-else conditions like `[x] if x.strip() else [x]`
+  - Ruff F401: remove unused imports immediately — `_UNSET` was imported but only used via MCP boundary (None at tool level)
+  - For conformance tests, prefer MCP-tool-level assertions (through `_call_tool`) over manager-level — they test the full stack
+  - `frontmatter.Post()` + `fm.dumps()` is the standard way to create raw docs on disk for scan tests
 ---
