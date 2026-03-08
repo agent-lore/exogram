@@ -1,11 +1,14 @@
 """Search engine - Tantivy full-text and ChromaDB semantic search."""
 
+from __future__ import annotations
+
 import logging
 import re
 import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import chromadb
 import tantivy
@@ -15,6 +18,9 @@ from lithos.config import LithosConfig, get_config
 from lithos.errors import IndexingError, SearchBackendError
 from lithos.knowledge import KnowledgeDocument
 from lithos.telemetry import lithos_metrics, traced
+
+if TYPE_CHECKING:
+    from chromadb.api import ClientAPI
 
 logger = logging.getLogger(__name__)
 
@@ -398,7 +404,7 @@ class ChromaIndex:
         """
         self.chroma_path = chroma_path
         self.model_name = model_name
-        self._client: chromadb.PersistentClient | None = None
+        self._client: ClientAPI | None = None
         self._collection: chromadb.Collection | None = None
         self._model: SentenceTransformer | None = None
 
@@ -410,7 +416,7 @@ class ChromaIndex:
         return self._model
 
     @property
-    def client(self) -> chromadb.PersistentClient:
+    def client(self) -> ClientAPI:
         """Get ChromaDB client."""
         if self._client is None:
             self.chroma_path.mkdir(parents=True, exist_ok=True)
@@ -421,11 +427,11 @@ class ChromaIndex:
     def collection(self) -> chromadb.Collection:
         """Get or create collection."""
         if self._collection is None:
-            self._collection = self.client.get_or_create_collection(
+            self._collection = self.client.get_or_create_collection(  # type: ignore[assignment]
                 name="knowledge",
                 metadata={"hnsw:space": "cosine"},
             )
-        return self._collection
+        return self._collection  # type: ignore[return-value]
 
     def _chunk_id(self, doc_id: str, chunk_index: int) -> str:
         """Generate unique ID for a chunk."""
@@ -483,7 +489,7 @@ class ChromaIndex:
             ids=ids,
             embeddings=embeddings,
             documents=chunks,
-            metadatas=metadatas,
+            metadatas=metadatas,  # type: ignore[arg-type]
         )
 
         return len(chunks)
@@ -545,7 +551,7 @@ class ChromaIndex:
 
         for i, _chunk_id in enumerate(results["ids"][0]):
             metadata = results["metadatas"][0][i] if results["metadatas"] else {}
-            doc_id = metadata.get("doc_id", "")
+            doc_id = str(metadata.get("doc_id", ""))
 
             # Skip if already seen this document
             if doc_id in seen_docs:
@@ -561,7 +567,7 @@ class ChromaIndex:
 
             # Apply tag filter
             if tags:
-                doc_tags = metadata.get("tags", "").split(",")
+                doc_tags = str(metadata.get("tags", "")).split(",")
                 if not all(t in doc_tags for t in tags):
                     continue
 
@@ -569,12 +575,12 @@ class ChromaIndex:
             semantic_results.append(
                 SemanticResult(
                     id=doc_id,
-                    title=metadata.get("title", ""),
+                    title=str(metadata.get("title", "")),
                     snippet=results["documents"][0][i] if results["documents"] else "",
                     similarity=similarity,
-                    path=metadata.get("path", ""),
-                    source_url=metadata.get("source_url", ""),
-                    updated_at=metadata.get("updated_at", ""),
+                    path=str(metadata.get("path", "")),
+                    source_url=str(metadata.get("source_url", "")),
+                    updated_at=str(metadata.get("updated_at", "")),
                 )
             )
 

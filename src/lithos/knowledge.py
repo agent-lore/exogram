@@ -307,7 +307,18 @@ def truncate_content(content: str, max_length: int) -> tuple[str, bool]:
     return content[:effective_max] + "...", True
 
 
-_UNSET = object()
+class _UnsetType:
+    """Sentinel type for omit-vs-clear distinction on optional fields."""
+
+    _instance: "_UnsetType | None" = None
+
+    def __new__(cls) -> "_UnsetType":
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+
+_UNSET = _UnsetType()
 """Sentinel for omit-vs-clear distinction on optional fields."""
 
 
@@ -343,16 +354,16 @@ class KnowledgeManager:
 
         for rel_path, md_file in candidates:
             try:
-                post = frontmatter.load(md_file)
-                doc_id = post.metadata.get("id")
-                title = post.metadata.get("title", "")
+                post = frontmatter.load(str(md_file))
+                doc_id: str | None = post.metadata.get("id")  # type: ignore[assignment]
+                title: str = post.metadata.get("title", "")  # type: ignore[assignment]
                 if doc_id:
                     self._id_to_path[doc_id] = rel_path
                     if title:
                         self._slug_to_id[slugify(title)] = doc_id
 
                     # Populate source_url -> id map
-                    raw_url = post.metadata.get("source_url")
+                    raw_url: str | None = post.metadata.get("source_url")  # type: ignore[assignment]
                     if raw_url:
                         try:
                             norm = normalize_url(raw_url)
@@ -509,7 +520,7 @@ class KnowledgeManager:
         if not full_path.exists():
             raise FileNotFoundError(f"Document not found: {file_path}")
 
-        post = frontmatter.load(full_path)
+        post = frontmatter.load(str(full_path))
         metadata = KnowledgeMetadata.from_dict(post.metadata)
 
         # Extract title and content from body
@@ -545,7 +556,7 @@ class KnowledgeManager:
         title: str | None = None,
         tags: list[str] | None = None,
         confidence: float | None = None,
-        source_url: str | None | object = _UNSET,
+        source_url: str | None | _UnsetType = _UNSET,
     ) -> KnowledgeDocument | dict:
         """Update an existing document.
 
@@ -561,7 +572,7 @@ class KnowledgeManager:
             old_source_url = doc.metadata.source_url
 
             # Handle source_url update
-            if source_url is not _UNSET:
+            if not isinstance(source_url, _UnsetType):
                 if source_url is None:
                     # Clear source_url
                     if old_source_url:

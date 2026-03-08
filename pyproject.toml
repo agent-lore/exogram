@@ -40,6 +40,7 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
     "ruff>=0.1.0",
+    "pyright>=1.1.0",
 ]
 otel = [
     "opentelemetry-sdk>=1.28.0",
@@ -59,6 +60,7 @@ features = ["dev"]
 
 [tool.hatch.envs.default.scripts]
 test = "pytest tests/ -v --tb=short"
+typecheck = "pyright src/"
 
 [tool.hatch.envs.hatch-test]
 extra-dependencies = [
@@ -92,6 +94,13 @@ known-first-party = ["lithos"]
 quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
+
+[tool.pyright]
+pythonVersion = "3.10"
+pythonPlatform = "Linux"
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -1,6 +1,7 @@
 """Lithos MCP Server - FastMCP server exposing all tools."""
 
 import asyncio
+import concurrent.futures
 import hashlib
 import logging
 from datetime import datetime
@@ -14,7 +15,7 @@ from watchdog.observers import Observer
 from lithos.config import LithosConfig, get_config, set_config
 from lithos.coordination import CoordinationService
 from lithos.graph import KnowledgeGraph
-from lithos.knowledge import _UNSET, KnowledgeDocument, KnowledgeManager
+from lithos.knowledge import _UNSET, KnowledgeDocument, KnowledgeManager, _UnsetType
 from lithos.search import SearchEngine
 from lithos.telemetry import get_tracer, register_active_claims_observer
 
@@ -43,7 +44,7 @@ class LithosServer:
         self._cached_active_claims: int = 0
 
         # File watcher
-        self._observer: Observer | None = None
+        self._observer: Observer | None = None  # type: ignore[reportInvalidTypeForm]
         self._watch_loop: asyncio.AbstractEventLoop | None = None
         self._pending_updates: set[Path] = set()
         self._update_lock = asyncio.Lock()
@@ -119,13 +120,14 @@ class LithosServer:
             raise RuntimeError("File watcher requires a running asyncio event loop") from None
 
         handler = _FileChangeHandler(self, self._watch_loop)
-        self._observer = Observer()
-        self._observer.schedule(
+        observer = Observer()
+        observer.schedule(
             handler,
             str(self.config.storage.knowledge_path),
             recursive=True,
         )
-        self._observer.start()
+        observer.start()
+        self._observer = observer
 
     def stop_file_watcher(self) -> None:
         """Stop file watcher."""
@@ -213,6 +215,7 @@ class LithosServer:
                 if id:
                     # Update existing — map MCP boundary to manager semantics:
                     # None (omitted) → _UNSET (preserve), "" → None (clear), str → pass through
+                    url_arg: str | None | _UnsetType
                     if source_url is None:
                         url_arg = _UNSET
                     elif source_url == "":
@@ -261,7 +264,8 @@ class LithosServer:
                             "warnings": warnings,
                         }
 
-                doc: KnowledgeDocument = result
+                assert isinstance(result, KnowledgeDocument)
+                doc = result
                 status_label = "updated" if id else "created"
 
                 # Update indices
@@ -1020,15 +1024,15 @@ class _FileChangeHandler(FileSystemEventHandler):
 
     def on_created(self, event: FileSystemEvent) -> None:
         if not event.is_directory:
-            self._schedule_update(Path(event.src_path))
+            self._schedule_update(Path(str(event.src_path)))
 
     def on_modified(self, event: FileSystemEvent) -> None:
         if not event.is_directory:
-            self._schedule_update(Path(event.src_path))
+            self._schedule_update(Path(str(event.src_path)))
 
     def on_deleted(self, event: FileSystemEvent) -> None:
         if not event.is_directory:
-            self._schedule_update(Path(event.src_path), deleted=True)
+            self._schedule_update(Path(str(event.src_path)), deleted=True)
 
     def _schedule_update(self, path: Path, deleted: bool = False) -> None:
         try:
@@ -1041,7 +1045,7 @@ class _FileChangeHandler(FileSystemEventHandler):
             pass
 
     @staticmethod
-    def _log_future_exception(future: asyncio.Future) -> None:
+    def _log_future_exception(future: "concurrent.futures.Future[None]") -> None:
         try:
             exception = future.exception()
             if exception:

@@ -67,6 +67,9 @@ uv run --extra dev ruff check .
 # Format check
 uv run --extra dev ruff format --check src/ tests/
 
+# Type check
+uv run --extra dev pyright src/
+
 # Auto-fix lint + format
 uv run --extra dev ruff check --fix . && uv run --extra dev ruff format src/ tests/
 
