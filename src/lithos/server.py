@@ -447,7 +447,7 @@ class LithosServer:
                 span.set_attribute("lithos.truncated", truncated)
                 meta = doc.metadata.to_dict()
                 meta["source_url"] = doc.metadata.source_url  # null when None
-                meta["derived_from_ids"] = doc.metadata.derived_from_ids
+                meta["derived_from_ids"] = self.knowledge._doc_to_sources.get(doc.id, [])
                 return {
                     "id": doc.id,
                     "title": doc.title,
@@ -664,7 +664,7 @@ class LithosServer:
                             "updated": d.metadata.updated_at.isoformat(),
                             "tags": d.metadata.tags,
                             "source_url": d.metadata.source_url or "",
-                            "derived_from_ids": d.metadata.derived_from_ids,
+                            "derived_from_ids": self.knowledge._doc_to_sources.get(d.id, []),
                         }
                         for d in docs
                     ],

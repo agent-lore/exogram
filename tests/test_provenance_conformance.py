@@ -515,3 +515,86 @@ class TestScanConformance:
         await server.knowledge.sync_from_disk(rel_path)
 
         assert server.knowledge._id_to_title[doc_id] == "New Title"
+
+
+# ---------------------------------------------------------------------------
+# 9. Read path normalization consistency
+# ---------------------------------------------------------------------------
+
+
+class TestReadPathNormalization:
+    """Conformance: MCP read/list return normalized derived_from_ids."""
+
+    async def test_lithos_read_returns_normalized_provenance(self, server: LithosServer):
+        """lithos_read returns normalized (lowercase) derived_from_ids for external files."""
+        knowledge_path = server.config.storage.knowledge_path
+
+        # Create source doc via MCP (let it generate its own id)
+        src_result = await _call_tool(
+            server,
+            "lithos_write",
+            {"title": "Source", "content": "Source content.", "agent": "test"},
+        )
+        source_id = src_result["id"]
+        derived_id = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+
+        # Create derived doc externally with UPPERCASE source reference
+        upper_source = source_id.upper()
+        post = fm.Post(
+            "# Derived\n\nContent.",
+            id=derived_id,
+            title="Derived",
+            derived_from_ids=[upper_source],
+            author="external",
+            created_at="2026-03-08T00:00:00+00:00",
+            updated_at="2026-03-08T00:00:00+00:00",
+            tags=[],
+            aliases=[],
+            confidence=1.0,
+            contributors=[],
+            source=None,
+            supersedes=None,
+        )
+        (knowledge_path / "derived-ext.md").write_text(fm.dumps(post))
+        await server.handle_file_change(knowledge_path / "derived-ext.md", deleted=False)
+
+        # lithos_read should return normalized (lowercase) UUID
+        result = await _call_tool(server, "lithos_read", {"id": derived_id})
+        assert result["metadata"]["derived_from_ids"] == [source_id]
+
+    async def test_lithos_list_returns_normalized_provenance(self, server: LithosServer):
+        """lithos_list returns normalized (lowercase) derived_from_ids for external files."""
+        knowledge_path = server.config.storage.knowledge_path
+
+        # Create source doc via MCP (let it generate its own id)
+        src_result = await _call_tool(
+            server,
+            "lithos_write",
+            {"title": "ListSrc", "content": "Source.", "agent": "test"},
+        )
+        source_id = src_result["id"]
+        derived_id = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+
+        # Create derived doc externally with uppercase reference
+        post = fm.Post(
+            "# ListDerived\n\nContent.",
+            id=derived_id,
+            title="ListDerived",
+            derived_from_ids=[source_id.upper()],
+            author="external",
+            created_at="2026-03-08T00:00:00+00:00",
+            updated_at="2026-03-08T00:00:00+00:00",
+            tags=[],
+            aliases=[],
+            confidence=1.0,
+            contributors=[],
+            source=None,
+            supersedes=None,
+        )
+        (knowledge_path / "list-derived.md").write_text(fm.dumps(post))
+        await server.handle_file_change(knowledge_path / "list-derived.md", deleted=False)
+
+        # lithos_list should return normalized UUIDs
+        result = await _call_tool(server, "lithos_list", {})
+        derived_entry = next(d for d in result["items"] if d["id"] == derived_id)
+        assert derived_entry["derived_from_ids"] == [source_id]
