@@ -1,7 +1,7 @@
 # Lithos - Specification
 
-Version: 0.4.0
-Date: 2026-02-28
+Version: 0.5.0
+Date: 2026-03-08
 Status: Aligned with Implementation
 
 ---
@@ -157,6 +157,9 @@ aliases:                          # Optional: Alternative names (Obsidian compat
   - <alias1>
 source: <string>                  # Optional: Task ID or provenance note
 source_url: <string>              # Optional: Canonical URL provenance (normalized on write)
+derived_from_ids:                 # Optional: Declared lineage (list of UUIDs)
+  - <uuid-1>
+  - <uuid-2>
 supersedes: <uuid>                # Optional: ID of document this replaces
 ---
 
@@ -268,7 +271,7 @@ Create or update a knowledge file.
 | `id` | string | No | UUID to update existing; omit to create new |
 | `source_task` | string | No | Task ID or provenance note (stored as `source` in frontmatter) |
 | `source_url` | string | No | Canonical URL provenance (http/https), dedup key after normalization. Pass `""` to clear on update. |
-| `derived_from_ids` | string[] | No | Canonical declared lineage (UUIDs) |
+| `derived_from_ids` | string[] | No | Canonical declared lineage (UUIDs). On create: `null`/omit stores `[]`. On update: `null`/omit preserves existing, `[]` clears, non-empty replaces. Self-references rejected. |
 | `ttl_hours` | float | No | Relative freshness window; converted to `expires_at` |
 | `expires_at` | string | No | Absolute ISO datetime freshness deadline |
 | `note_type` | string | No | LCMA note type (`observation`, `summary`, `concept`, etc.) |
@@ -304,6 +307,8 @@ Read a knowledge file by ID or path.
 
 **Returns:** `{ id, title, content, metadata, links, truncated: boolean }`
 
+**Metadata includes:** `derived_from_ids` (list of source UUIDs, may be empty).
+
 **Truncation behavior:** When `max_length` is specified, content is truncated at the nearest paragraph or sentence boundary at or before the limit. Returns `truncated: true` if content was shortened.
 
 #### `lithos_delete`
@@ -329,7 +334,7 @@ Full-text search across knowledge base.
 | `author` | string | No | Filter by author |
 | `path_prefix` | string | No | Filter by path prefix |
 
-**Returns:** `{ results: [{ id, title, snippet, score, path, source_url, updated_at, is_stale }] }`
+**Returns:** `{ results: [{ id, title, snippet, score, path, source_url, updated_at, is_stale, derived_from_ids }] }`
 
 **Snippet source:** Tantivy-generated highlight showing matching terms in context.
 
@@ -344,7 +349,7 @@ Semantic similarity search.
 | `threshold` | float | No | Minimum similarity 0-1 (default: from config, 0.3) |
 | `tags` | string[] | No | Filter by tags |
 
-**Returns:** `{ results: [{ id, title, snippet, similarity, path, source_url, updated_at, is_stale }] }`
+**Returns:** `{ results: [{ id, title, snippet, similarity, path, source_url, updated_at, is_stale, derived_from_ids }] }`
 
 **Snippet source:** Content of the best-matching chunk for each document.
 
@@ -363,7 +368,7 @@ List knowledge items with filters.
 | `limit` | int | No | Max results (default: 50) |
 | `offset` | int | No | Pagination offset |
 
-**Returns:** `{ items: [{ id, title, path, updated, tags, source_url }], total: int }`
+**Returns:** `{ items: [{ id, title, path, updated, tags, source_url, derived_from_ids }], total: int }`
 
 ### 5.2 Graph Operations
 
@@ -389,6 +394,37 @@ List all tags with document counts.
 **Returns:** `{ tags: { name: count, ... } }`
 
 **Note:** To find documents with a specific tag, use `lithos_list(tags=["tag-name"])`.
+
+#### `lithos_provenance`
+Traverse provenance lineage (derived-from relationships) for a knowledge item.
+
+**Arguments:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `id` | string | Yes | UUID of knowledge item |
+| `direction` | string | No | "sources", "derived", or "both" (default: "both") |
+| `depth` | int | No | Traversal depth 1-3 (default: 1) |
+| `include_unresolved` | bool | No | Include unresolved source IDs (default: false) |
+
+**Returns:**
+```json
+{
+  "id": "<queried-uuid>",
+  "sources": [{ "id": "<uuid>", "title": "<string>" }],
+  "derived": [{ "id": "<uuid>", "title": "<string>" }],
+  "unresolved": ["<uuid>", ...]
+}
+```
+
+**Behavior:**
+- Uses BFS traversal over in-memory provenance indexes.
+- `sources` walks the `derived_from_ids` chain (what was this derived from?).
+- `derived` walks the reverse index (what was derived from this?).
+- `depth` is clamped to 1-3. Depth > 1 follows multi-hop chains (e.g., A→B→C at depth 2).
+- Cycles are handled via a visited set — BFS terminates without infinite loops.
+- `unresolved` is only populated when `include_unresolved=true`. Contains source UUIDs that reference documents not currently in the knowledge base.
+- Returns `{ status: "error", code: "doc_not_found" }` for unknown IDs.
+- Results are sorted by ID for deterministic output.
 
 ### 5.3 Agent Operations
 
@@ -825,7 +861,7 @@ These are explicitly not part of the initial implementation but may be considere
 - `lithos_task_cancel` tool
 - Hierarchical multi-hop link results
 - Structured MCP error codes (`NOT_FOUND`, `CLAIM_CONFLICT`, `AMBIGUOUS_LINK`, etc.)
-- Structured `source` provenance with `derived_from` links to source knowledge items
+- ~~Structured `source` provenance with `derived_from` links to source knowledge items~~ (Implemented in Phase 3 via `derived_from_ids` and `lithos_provenance`)
 - `lithos_tags` filtering: accept a `tag` parameter to return documents with that tag
 - `lithos_delete` audit trail logging (record which agent deleted what)
 
@@ -890,12 +926,12 @@ These are explicitly not part of the initial implementation but may be considere
 | Category | Tools |
 |----------|-------|
 | Knowledge | `lithos_write`, `lithos_read`, `lithos_delete`, `lithos_search`, `lithos_semantic`, `lithos_list` |
-| Graph | `lithos_links`, `lithos_tags` |
+| Graph | `lithos_links`, `lithos_tags`, `lithos_provenance` |
 | Agent | `lithos_agent_register`, `lithos_agent_info`, `lithos_agent_list` |
 | Coordination | `lithos_task_create`, `lithos_task_claim`, `lithos_task_renew`, `lithos_task_release`, `lithos_task_complete`, `lithos_task_status`, `lithos_finding_post`, `lithos_finding_list` |
 | System | `lithos_stats` |
 
-**Total: 20 MCP tools**
+**Total: 21 MCP tools**
 
 ---
 
