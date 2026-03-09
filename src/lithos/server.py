@@ -682,6 +682,149 @@ class LithosServer:
                 }
 
         @self.mcp.tool()
+        async def lithos_cache_lookup(
+            query: str,
+            source_url: str | None = None,
+            max_age_hours: float | None = None,
+            min_confidence: float = 0.5,
+            limit: int = 3,
+            tags: list[str] | None = None,
+        ) -> dict[str, Any]:
+            """Check if fresh cached knowledge exists before doing expensive research.
+
+            Returns a cache hit with full document content if fresh knowledge exists,
+            a stale reference if expired knowledge exists (update instead of duplicate),
+            or a clean miss if nothing relevant is found.
+
+            Args:
+                query: What you are about to research
+                source_url: Canonical URL for exact dedup-aware lookup
+                max_age_hours: Reject docs older than N hours (uses updated_at)
+                min_confidence: Minimum confidence threshold (default: 0.5)
+                limit: Max candidate docs to evaluate (default: 3)
+                tags: Restrict to tagged docs (AND semantics)
+
+            Returns:
+                Dict with hit, document, stale_exists, stale_id
+            """
+            logger.info("lithos_cache_lookup query_len=%d source_url=%s", len(query), source_url)
+            tracer = get_tracer()
+            with tracer.start_as_current_span("lithos.cache_lookup") as span:
+                span.set_attribute("lithos.tool", "lithos_cache_lookup")
+                span.set_attribute("cache.source_url_used", source_url is not None)
+
+                candidates: list[str] = []
+                candidates_evaluated = 0
+
+                # Fast path: source_url exact lookup
+                if source_url is not None:
+                    fast_doc = await self.knowledge.find_by_source_url(source_url)
+                    if fast_doc is not None:
+                        # Tag filtering on fast path
+                        if tags:
+                            doc_tags = fast_doc.metadata.tags
+                            if all(t in doc_tags for t in tags):
+                                candidates = [fast_doc.id]
+                            # else: tag filter failed, fall through to semantic
+                        else:
+                            candidates = [fast_doc.id]
+
+                # Fallback: semantic search
+                if not candidates:
+                    try:
+                        sem_results = self.search.semantic_search(
+                            query=query,
+                            limit=limit,
+                            threshold=0.0,
+                            tags=tags,
+                        )
+                        candidates = [r.id for r in sem_results[:limit]]
+                    except Exception:
+                        candidates = []
+
+                # Evaluate candidates
+                best_hit = None
+                first_stale_id: str | None = None
+                now = datetime.now(timezone.utc)
+
+                for doc_id in candidates:
+                    try:
+                        doc, _ = await self.knowledge.read(id=doc_id)
+                    except (FileNotFoundError, ValueError):
+                        continue
+
+                    candidates_evaluated += 1
+                    meta = doc.metadata
+
+                    # Skip if below confidence threshold
+                    if meta.confidence < min_confidence:
+                        continue
+
+                    # Check staleness (explicit expiry)
+                    if meta.is_stale:
+                        if first_stale_id is None:
+                            first_stale_id = doc_id
+                        continue
+
+                    # Check max_age_hours
+                    if max_age_hours is not None:
+                        from lithos.knowledge import _normalize_datetime
+
+                        updated = _normalize_datetime(meta.updated_at)
+                        cutoff = now - timedelta(hours=max_age_hours)
+                        if updated < cutoff:
+                            if first_stale_id is None:
+                                first_stale_id = doc_id
+                            continue
+
+                    # First passing candidate is the best hit
+                    best_hit = doc
+                    break
+
+                span.set_attribute("cache.candidates_evaluated", candidates_evaluated)
+
+                if best_hit is not None:
+                    span.set_attribute("cache.hit", True)
+                    span.set_attribute("cache.stale_exists", False)
+                    return {
+                        "hit": True,
+                        "document": {
+                            "id": best_hit.id,
+                            "title": best_hit.title,
+                            "content": best_hit.content,
+                            "confidence": best_hit.metadata.confidence,
+                            "updated_at": best_hit.metadata.updated_at.isoformat(),
+                            "expires_at": (
+                                best_hit.metadata.expires_at.isoformat()
+                                if best_hit.metadata.expires_at
+                                else None
+                            ),
+                            "tags": best_hit.metadata.tags,
+                            "source_url": best_hit.metadata.source_url,
+                        },
+                        "stale_exists": False,
+                        "stale_id": None,
+                    }
+                elif first_stale_id is not None:
+                    span.set_attribute("cache.hit", False)
+                    span.set_attribute("cache.stale_exists", True)
+                    return {
+                        "hit": False,
+                        "document": None,
+                        "stale_exists": True,
+                        "stale_id": first_stale_id,
+                    }
+                else:
+                    span.set_attribute("cache.hit", False)
+                    span.set_attribute("cache.stale_exists", False)
+                    return {
+                        "hit": False,
+                        "document": None,
+                        "stale_exists": False,
+                        "stale_id": None,
+                    }
+
+        @self.mcp.tool()
         async def lithos_list(
             path_prefix: str | None = None,
             tags: list[str] | None = None,

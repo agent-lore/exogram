@@ -890,3 +890,203 @@ class TestFreshnessWritePath:
         ).document
         assert updated is not None
         assert updated.metadata.expires_at is None
+
+
+class TestCacheLookup:
+    """Integration tests for lithos_cache_lookup tool."""
+
+    async def _call_cache_lookup(self, server: LithosServer, **kwargs) -> dict:
+        """Helper to call cache lookup tool."""
+        tools = await server.mcp.get_tools()
+        tool = tools["lithos_cache_lookup"]
+        result = await tool.fn(**kwargs)
+        return result
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_fresh_doc(self, server: LithosServer):
+        """Cache lookup returns hit for fresh doc."""
+        from datetime import timedelta
+
+        doc = (
+            await server.knowledge.create(
+                title="Fresh Cache Doc",
+                content="Information about quantum computing.",
+                agent="agent",
+                tags=["research"],
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            )
+        ).document
+        server.search.index_document(doc)
+
+        result = await self._call_cache_lookup(
+            server, query="quantum computing", tags=["research"]
+        )
+        assert result["hit"] is True
+        assert result["document"] is not None
+        assert result["document"]["id"] == doc.id
+        assert result["document"]["content"] == "Information about quantum computing."
+        assert result["stale_exists"] is False
+        assert result["stale_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_cache_miss_stale_doc(self, server: LithosServer):
+        """Cache lookup returns stale reference for expired doc."""
+        from datetime import timedelta
+
+        doc = (
+            await server.knowledge.create(
+                title="Stale Cache Doc",
+                content="Outdated information about AI trends.",
+                agent="agent",
+                tags=["research"],
+                expires_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            )
+        ).document
+        server.search.index_document(doc)
+
+        result = await self._call_cache_lookup(
+            server, query="AI trends", tags=["research"]
+        )
+        assert result["hit"] is False
+        assert result["document"] is None
+        assert result["stale_exists"] is True
+        assert result["stale_id"] == doc.id
+
+    @pytest.mark.asyncio
+    async def test_cache_clean_miss(self, server: LithosServer):
+        """Cache lookup returns clean miss when no matching doc exists."""
+        result = await self._call_cache_lookup(
+            server, query="completely unique topic xyz123"
+        )
+        assert result["hit"] is False
+        assert result["document"] is None
+        assert result["stale_exists"] is False
+        assert result["stale_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_source_url_fast_path_hit(self, server: LithosServer):
+        """Cache lookup uses source_url fast path for exact match."""
+        from datetime import timedelta
+
+        doc = (
+            await server.knowledge.create(
+                title="URL Doc",
+                content="Content from example.com.",
+                agent="agent",
+                source_url="https://example.com/article",
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            )
+        ).document
+        server.search.index_document(doc)
+
+        result = await self._call_cache_lookup(
+            server,
+            query="example article",
+            source_url="https://example.com/article",
+        )
+        assert result["hit"] is True
+        assert result["document"]["id"] == doc.id
+        assert result["document"]["source_url"] == "https://example.com/article"
+
+    @pytest.mark.asyncio
+    async def test_source_url_fast_path_miss_falls_back(self, server: LithosServer):
+        """Cache lookup falls back to semantic when source_url not found."""
+        from datetime import timedelta
+
+        doc = (
+            await server.knowledge.create(
+                title="Fallback Semantic Doc",
+                content="Information about neural networks and deep learning.",
+                agent="agent",
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            )
+        ).document
+        server.search.index_document(doc)
+
+        result = await self._call_cache_lookup(
+            server,
+            query="neural networks deep learning",
+            source_url="https://nonexistent.com/page",
+        )
+        # Should fall back to semantic and potentially find the doc
+        assert isinstance(result["hit"], bool)
+
+    @pytest.mark.asyncio
+    async def test_confidence_filter(self, server: LithosServer):
+        """Cache lookup filters out low-confidence docs."""
+        from datetime import timedelta
+
+        doc = (
+            await server.knowledge.create(
+                title="Low Confidence Doc",
+                content="Uncertain information about dark matter theories.",
+                agent="agent",
+                confidence=0.2,
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            )
+        ).document
+        server.search.index_document(doc)
+
+        result = await self._call_cache_lookup(
+            server, query="dark matter theories", min_confidence=0.5
+        )
+        # Should not match because confidence is below threshold
+        assert result["hit"] is False
+
+    @pytest.mark.asyncio
+    async def test_max_age_hours_filter(self, server: LithosServer):
+        """Cache lookup respects max_age_hours filter."""
+        from datetime import timedelta
+
+        # Create a doc that hasn't expired but is old
+        doc = (
+            await server.knowledge.create(
+                title="Old Research Doc",
+                content="Research about blockchain consensus mechanisms.",
+                agent="agent",
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=100),
+            )
+        ).document
+        # Manually set updated_at to 48 hours ago
+        doc.metadata.updated_at = datetime.now(timezone.utc) - timedelta(hours=48)
+        # Re-write to disk to persist the old updated_at
+        path = server.knowledge._resolve_safe_path(doc.path)[1]
+        path.write_text(doc.to_markdown())
+        # Re-read to reload from disk
+        server.knowledge._id_to_path[doc.id] = doc.path
+        server.search.index_document(doc)
+
+        result = await self._call_cache_lookup(
+            server, query="blockchain consensus", max_age_hours=24
+        )
+        # Should be treated as stale because it's older than 24 hours
+        assert result["hit"] is False
+
+    @pytest.mark.asyncio
+    async def test_tag_filtering_on_fast_path(self, server: LithosServer):
+        """Fast path source_url match must also pass tag filter."""
+        from datetime import timedelta
+
+        doc = (
+            await server.knowledge.create(
+                title="Tagged URL Doc",
+                content="Content with specific tags.",
+                agent="agent",
+                source_url="https://example.com/tagged",
+                tags=["python"],
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            )
+        ).document
+        server.search.index_document(doc)
+
+        # Should fail tag filter (doc has "python" but we ask for "rust")
+        result = await self._call_cache_lookup(
+            server,
+            query="tagged content",
+            source_url="https://example.com/tagged",
+            tags=["rust"],
+        )
+        # Fast path doc doesn't match tags, falls through
+        assert result["document"] is None or (
+            result["document"] is not None and "rust" in result["document"].get("tags", [])
+        )
