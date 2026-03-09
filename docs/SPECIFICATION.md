@@ -339,7 +339,7 @@ Full-text search across knowledge base.
 
 **Returns:** `{ results: [{ id, title, snippet, score, path, source_url, updated_at, is_stale, derived_from_ids }] }`
 
-**Snippet source:** Tantivy-generated highlight showing matching terms in context.
+**Snippet source:** Snippet showing matching terms in context.
 
 #### `lithos_semantic`
 Semantic similarity search.
@@ -465,7 +465,7 @@ Traverse provenance lineage (derived-from relationships) for a knowledge item.
 | `id` | string | Yes | UUID of knowledge item |
 | `direction` | string | No | "sources", "derived", or "both" (default: "both") |
 | `depth` | int | No | Traversal depth 1-3 (default: 1) |
-| `include_unresolved` | bool | No | Include unresolved source IDs (default: false) |
+| `include_unresolved` | bool | No | Include unresolved source IDs (default: true) |
 
 **Returns:**
 ```json
@@ -473,7 +473,7 @@ Traverse provenance lineage (derived-from relationships) for a knowledge item.
   "id": "<queried-uuid>",
   "sources": [{ "id": "<uuid>", "title": "<string>" }],
   "derived": [{ "id": "<uuid>", "title": "<string>" }],
-  "unresolved": ["<uuid>", ...]
+  "unresolved_sources": ["<uuid>", ...]
 }
 ```
 
@@ -483,7 +483,7 @@ Traverse provenance lineage (derived-from relationships) for a knowledge item.
 - `derived` walks the reverse index (what was derived from this?).
 - `depth` is clamped to 1-3. Depth > 1 follows multi-hop chains (e.g., A→B→C at depth 2).
 - Cycles are handled via a visited set — BFS terminates without infinite loops.
-- `unresolved` is only populated when `include_unresolved=true`. Contains source UUIDs that reference documents not currently in the knowledge base.
+- `unresolved_sources` is only populated when `include_unresolved=true` (the default). Contains source UUIDs that reference documents not currently in the knowledge base.
 - Returns `{ status: "error", code: "doc_not_found" }` for unknown IDs.
 - Results are sorted by ID for deterministic output.
 
@@ -657,20 +657,20 @@ Get knowledge base statistics.
 
 ## 6. Index Behavior
 
-### 6.1 Startup (Incremental Loading)
+### 6.1 Startup
 
-1. Load persisted Tantivy index from `.tantivy/`
-2. Load persisted ChromaDB from `.chroma/`
-3. Load or rebuild NetworkX graph from `.graph/` cache
-4. Scan `knowledge/` directory for file changes:
-   - Compare file `mtime` against last indexed time
-   - Add new files to indices
-   - Update modified files in indices
-   - Remove deleted files from indices
-5. Load coordination state from `.lithos/coordination.db`
+1. Ensure data directories exist
+2. Initialize coordination database (`.lithos/coordination.db`)
+3. Check if Tantivy index needs rebuild (schema version mismatch)
+4. **Rebuild decision** (first matching condition wins):
+   - `rebuild_on_start` config flag is set → full rebuild
+   - Tantivy schema version requires rebuild → full rebuild
+   - NetworkX graph cache (`.graph/graph.pickle`) fails to load → full rebuild
+   - Graph cache loads successfully → use existing indices
+5. **Full rebuild** (when triggered): clear all indices, scan `knowledge/` directory, re-parse and re-index every `.md` file
 6. Start file watcher
 
-**Full rebuild** only when forced via `lithos reindex --clear`.
+**On-demand rebuild** via `lithos reindex --clear`.
 
 ### 6.2 File Change Handling
 

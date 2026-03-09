@@ -1076,7 +1076,7 @@ class KnowledgeManager:
         for doc_id, cached in self._meta_cache.items():
             if path_prefix and not str(cached.path).startswith(path_prefix):
                 continue
-            if tags and not any(t in cached.tags for t in tags):
+            if tags and not all(t in cached.tags for t in tags):
                 continue
             if author and cached.author != author:
                 continue
