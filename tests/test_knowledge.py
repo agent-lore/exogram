@@ -2906,8 +2906,6 @@ class TestExpiresAtWritePath:
         """update() with _UNSET preserves existing expires_at."""
         from datetime import timedelta
 
-        from lithos.knowledge import _UNSET
-
         expires = datetime.now(timezone.utc) + timedelta(hours=24)
         doc = (
             await knowledge_manager.create(

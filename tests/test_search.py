@@ -717,3 +717,136 @@ class TestSchemaVersionDetection:
         idx2.add_document(doc)
         results = idx2.search("test")
         assert len(results) >= 1
+
+
+class TestExpiresAtInSearch:
+    """Tests for expires_at / is_stale in search index backends."""
+
+    @pytest.mark.asyncio
+    async def test_tantivy_expired_doc_is_stale(
+        self, knowledge_manager: KnowledgeManager, search_engine: SearchEngine
+    ):
+        """Tantivy search returns is_stale=True for expired doc."""
+        from datetime import datetime, timedelta, timezone
+
+        doc = (
+            await knowledge_manager.create(
+                title="Expired Research",
+                content="This research has expired and is stale.",
+                agent="agent",
+                expires_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            )
+        ).document
+        search_engine.index_document(doc)
+
+        results = search_engine.full_text_search("expired research")
+        assert len(results) >= 1
+        match = [r for r in results if r.id == doc.id]
+        assert len(match) == 1
+        assert match[0].is_stale is True
+
+    @pytest.mark.asyncio
+    async def test_tantivy_fresh_doc_not_stale(
+        self, knowledge_manager: KnowledgeManager, search_engine: SearchEngine
+    ):
+        """Tantivy search returns is_stale=False for fresh doc."""
+        from datetime import datetime, timedelta, timezone
+
+        doc = (
+            await knowledge_manager.create(
+                title="Fresh Research",
+                content="This research is still fresh and valid.",
+                agent="agent",
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            )
+        ).document
+        search_engine.index_document(doc)
+
+        results = search_engine.full_text_search("fresh research")
+        assert len(results) >= 1
+        match = [r for r in results if r.id == doc.id]
+        assert len(match) == 1
+        assert match[0].is_stale is False
+
+    @pytest.mark.asyncio
+    async def test_tantivy_no_expires_at_not_stale(
+        self, knowledge_manager: KnowledgeManager, search_engine: SearchEngine
+    ):
+        """Tantivy search returns is_stale=False for doc without expires_at."""
+        doc = (
+            await knowledge_manager.create(
+                title="No Expiry Research",
+                content="This research has no expiry date set.",
+                agent="agent",
+            )
+        ).document
+        search_engine.index_document(doc)
+
+        results = search_engine.full_text_search("no expiry research")
+        assert len(results) >= 1
+        match = [r for r in results if r.id == doc.id]
+        assert len(match) == 1
+        assert match[0].is_stale is False
+
+    @pytest.mark.asyncio
+    async def test_chroma_expired_doc_is_stale(
+        self, knowledge_manager: KnowledgeManager, search_engine: SearchEngine
+    ):
+        """ChromaDB search returns is_stale=True for expired doc."""
+        from datetime import datetime, timedelta, timezone
+
+        doc = (
+            await knowledge_manager.create(
+                title="Expired Semantic Doc",
+                content="This document about machine learning has expired.",
+                agent="agent",
+                expires_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            )
+        ).document
+        search_engine.index_document(doc)
+
+        results = search_engine.semantic_search("machine learning expired")
+        match = [r for r in results if r.id == doc.id]
+        assert len(match) == 1
+        assert match[0].is_stale is True
+
+    @pytest.mark.asyncio
+    async def test_chroma_fresh_doc_not_stale(
+        self, knowledge_manager: KnowledgeManager, search_engine: SearchEngine
+    ):
+        """ChromaDB search returns is_stale=False for fresh doc."""
+        from datetime import datetime, timedelta, timezone
+
+        doc = (
+            await knowledge_manager.create(
+                title="Fresh Semantic Doc",
+                content="This document about deep learning is still fresh.",
+                agent="agent",
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            )
+        ).document
+        search_engine.index_document(doc)
+
+        results = search_engine.semantic_search("deep learning fresh")
+        match = [r for r in results if r.id == doc.id]
+        assert len(match) == 1
+        assert match[0].is_stale is False
+
+    @pytest.mark.asyncio
+    async def test_chroma_no_expires_at_not_stale(
+        self, knowledge_manager: KnowledgeManager, search_engine: SearchEngine
+    ):
+        """ChromaDB search returns is_stale=False for doc without expires_at."""
+        doc = (
+            await knowledge_manager.create(
+                title="No Expiry Semantic Doc",
+                content="This document about neural networks has no expiry.",
+                agent="agent",
+            )
+        ).document
+        search_engine.index_document(doc)
+
+        results = search_engine.semantic_search("neural networks no expiry")
+        match = [r for r in results if r.id == doc.id]
+        assert len(match) == 1
+        assert match[0].is_stale is False

@@ -7,6 +7,7 @@ import re
 import shutil
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -51,6 +52,21 @@ class SemanticResult:
     source_url: str = ""
     updated_at: str = ""
     is_stale: bool = False
+
+
+def _compute_is_stale(expires_at_str: str) -> bool:
+    """Compute staleness from an expires_at ISO string."""
+    if not expires_at_str:
+        return False
+    try:
+        expires_dt = datetime.fromisoformat(expires_at_str)
+        if expires_dt.tzinfo is None:
+            expires_dt = expires_dt.replace(tzinfo=timezone.utc)
+        else:
+            expires_dt = expires_dt.astimezone(timezone.utc)
+        return datetime.now(timezone.utc) > expires_dt
+    except ValueError:
+        return False
 
 
 def chunk_text(text: str, chunk_size: int = 500, chunk_max: int = 1000) -> list[str]:
@@ -266,7 +282,7 @@ class TantivyIndex:
                 tags=" ".join(doc.metadata.tags),
                 source_url=doc.metadata.source_url or "",
                 updated_at=doc.metadata.updated_at.isoformat() if doc.metadata.updated_at else "",
-                expires_at="",
+                expires_at=doc.metadata.expires_at.isoformat() if doc.metadata.expires_at else "",
             )
         )
 
@@ -336,6 +352,7 @@ class TantivyIndex:
             content = doc.get_first("content") or ""
             snippet = self._generate_snippet(content, query)
 
+            expires_at_str = doc.get_first("expires_at") or ""
             search_results.append(
                 SearchResult(
                     id=doc.get_first("id") or "",
@@ -345,6 +362,7 @@ class TantivyIndex:
                     path=str(doc_path),
                     source_url=doc.get_first("source_url") or "",
                     updated_at=doc.get_first("updated_at") or "",
+                    is_stale=_compute_is_stale(expires_at_str),
                 )
             )
 
@@ -480,6 +498,9 @@ class ChromaIndex:
                 "updated_at": (
                     doc.metadata.updated_at.isoformat() if doc.metadata.updated_at else ""
                 ),
+                "expires_at": (
+                    doc.metadata.expires_at.isoformat() if doc.metadata.expires_at else ""
+                ),
             }
             for i in range(len(chunks))
         ]
@@ -572,6 +593,7 @@ class ChromaIndex:
                     continue
 
             seen_docs.add(doc_id)
+            expires_at_str = str(metadata.get("expires_at", ""))
             semantic_results.append(
                 SemanticResult(
                     id=doc_id,
@@ -581,6 +603,7 @@ class ChromaIndex:
                     path=str(metadata.get("path", "")),
                     source_url=str(metadata.get("source_url", "")),
                     updated_at=str(metadata.get("updated_at", "")),
+                    is_stale=_compute_is_stale(expires_at_str),
                 )
             )
 
