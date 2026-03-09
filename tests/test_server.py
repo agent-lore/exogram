@@ -1083,3 +1083,82 @@ class TestCacheLookup:
         assert result["document"] is None or (
             result["document"] is not None and "rust" in result["document"].get("tags", [])
         )
+
+    @pytest.mark.asyncio
+    async def test_cache_lookup_search_backend_error(self, server: LithosServer):
+        """SearchBackendError surfaces as search_unreliable, not a clean miss."""
+        from unittest.mock import patch
+
+        from lithos.errors import SearchBackendError
+
+        err = SearchBackendError("chroma down", {"chroma": RuntimeError("connection refused")})
+        with patch.object(server.search, "semantic_search", side_effect=err):
+            result = await self._call_cache_lookup(server, query="anything")
+
+        assert result["hit"] is False
+        assert result["search_unreliable"] is True
+        assert "chroma" in result["message"]
+        assert result["stale_exists"] is False
+        assert result["stale_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_cache_lookup_invalid_max_age_hours(self, server: LithosServer):
+        """Negative max_age_hours returns invalid_input error."""
+        result = await self._call_cache_lookup(server, query="test", max_age_hours=-1)
+        assert result["status"] == "error"
+        assert result["code"] == "invalid_input"
+
+    @pytest.mark.asyncio
+    async def test_cache_lookup_invalid_limit(self, server: LithosServer):
+        """Zero limit returns invalid_input error."""
+        result = await self._call_cache_lookup(server, query="test", limit=0)
+        assert result["status"] == "error"
+        assert result["code"] == "invalid_input"
+
+    @pytest.mark.asyncio
+    async def test_cache_lookup_invalid_min_confidence(self, server: LithosServer):
+        """Out-of-range min_confidence returns invalid_input error."""
+        result = await self._call_cache_lookup(server, query="test", min_confidence=1.5)
+        assert result["status"] == "error"
+        assert result["code"] == "invalid_input"
+
+
+class TestWriteMutualExclusion:
+    """Tests for ttl_hours / expires_at mutual exclusion at the MCP boundary."""
+
+    async def _call_write(self, server: LithosServer, **kwargs) -> dict:
+        tools = await server.mcp.get_tools()
+        return await tools["lithos_write"].fn(**kwargs)
+
+    @pytest.mark.asyncio
+    async def test_ttl_hours_with_empty_expires_at_is_error(self, server: LithosServer):
+        """ttl_hours + expires_at='' is contradictory and must be rejected."""
+        result = await self._call_write(
+            server,
+            title="Contradiction",
+            content="Should fail.",
+            agent="agent",
+            ttl_hours=24.0,
+            expires_at="",
+        )
+        assert result["status"] == "error"
+        assert result["code"] == "invalid_input"
+
+    @pytest.mark.asyncio
+    async def test_write_via_tool_with_ttl_hours(self, server: LithosServer):
+        """lithos_write tool with ttl_hours sets expires_at in metadata."""
+        result = await self._call_write(
+            server,
+            title="TTL via Tool",
+            content="Content with TTL via MCP boundary.",
+            agent="agent",
+            ttl_hours=24.0,
+        )
+        assert result["status"] == "created"
+        doc_id = result["id"]
+
+        doc, _ = await server.knowledge.read(id=doc_id)
+        assert doc.metadata.expires_at is not None
+        # Should be roughly 24h from now
+        delta = (doc.metadata.expires_at - datetime.now(timezone.utc)).total_seconds()
+        assert 23 * 3600 < delta < 25 * 3600

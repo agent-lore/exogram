@@ -16,6 +16,7 @@ from watchdog.observers import Observer
 
 from lithos.config import LithosConfig, get_config, set_config
 from lithos.coordination import CoordinationService
+from lithos.errors import SearchBackendError
 from lithos.events import (
     AGENT_REGISTERED,
     FINDING_POSTED,
@@ -322,7 +323,7 @@ class LithosServer:
                 warnings: list[str] = []
 
                 # Validate ttl_hours / expires_at mutual exclusion
-                if ttl_hours is not None and expires_at is not None and expires_at != "":
+                if ttl_hours is not None and expires_at is not None:
                     return {
                         "status": "error",
                         "code": "invalid_input",
@@ -337,12 +338,12 @@ class LithosServer:
                     or math.isinf(ttl_hours)
                     or ttl_hours <= 0
                 ):
-                        return {
-                            "status": "error",
-                            "code": "invalid_input",
-                            "message": "ttl_hours must be a finite positive number.",
-                            "warnings": [],
-                        }
+                    return {
+                        "status": "error",
+                        "code": "invalid_input",
+                        "message": "ttl_hours must be a finite positive number.",
+                        "warnings": [],
+                    }
 
                 # Emit freshness span attributes
                 if ttl_hours is not None:
@@ -364,6 +365,10 @@ class LithosServer:
                     else:
                         try:
                             expires_at_dt = datetime.fromisoformat(expires_at)
+                            if expires_at_dt.tzinfo is None:
+                                expires_at_dt = expires_at_dt.replace(tzinfo=timezone.utc)
+                            else:
+                                expires_at_dt = expires_at_dt.astimezone(timezone.utc)
                         except ValueError:
                             return {
                                 "status": "error",
@@ -378,6 +383,10 @@ class LithosServer:
                     else:
                         try:
                             expires_at_dt = datetime.fromisoformat(expires_at)
+                            if expires_at_dt.tzinfo is None:
+                                expires_at_dt = expires_at_dt.replace(tzinfo=timezone.utc)
+                            else:
+                                expires_at_dt = expires_at_dt.astimezone(timezone.utc)
                         except ValueError:
                             return {
                                 "status": "error",
@@ -714,6 +723,27 @@ class LithosServer:
                 Dict with hit, document, stale_exists, stale_id
             """
             logger.info("lithos_cache_lookup query_len=%d source_url=%s", len(query), source_url)
+
+            # Input validation
+            if max_age_hours is not None and max_age_hours <= 0:
+                return {
+                    "status": "error",
+                    "code": "invalid_input",
+                    "message": "max_age_hours must be positive.",
+                }
+            if limit < 1:
+                return {
+                    "status": "error",
+                    "code": "invalid_input",
+                    "message": "limit must be >= 1.",
+                }
+            if not (0.0 <= min_confidence <= 1.0):
+                return {
+                    "status": "error",
+                    "code": "invalid_input",
+                    "message": "min_confidence must be between 0.0 and 1.0.",
+                }
+
             import time as _time
 
             _lookup_start = _time.perf_counter()
@@ -748,8 +778,19 @@ class LithosServer:
                             tags=tags,
                         )
                         candidates = [r.id for r in sem_results[:limit]]
-                    except Exception:
-                        candidates = []
+                    except SearchBackendError as exc:
+                        span.set_attribute("cache.search_error", True)
+                        elapsed_ms = (_time.perf_counter() - _lookup_start) * 1000
+                        lithos_metrics.cache_lookup_duration.record(elapsed_ms)
+                        lithos_metrics.cache_lookups.add(1, {"outcome": "error_search_backend"})
+                        return {
+                            "hit": False,
+                            "document": None,
+                            "stale_exists": False,
+                            "stale_id": None,
+                            "search_unreliable": True,
+                            "message": f"Semantic search backend failed: {exc}",
+                        }
 
                 # Evaluate candidates
                 best_hit = None

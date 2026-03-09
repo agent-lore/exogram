@@ -257,6 +257,10 @@ class KnowledgeMetadata:
         expires_at = data.get("expires_at")
         if isinstance(expires_at, str):
             expires_at = datetime.fromisoformat(expires_at)
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            else:
+                expires_at = expires_at.astimezone(timezone.utc)
         elif not isinstance(expires_at, datetime):
             expires_at = None
 

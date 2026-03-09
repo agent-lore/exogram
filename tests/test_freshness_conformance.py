@@ -51,6 +51,43 @@ class TestFreshnessWriteConformance:
         read_doc, _ = await server.knowledge.read(id=doc.id)
         assert read_doc.metadata.expires_at == expires
 
+    @pytest.mark.asyncio
+    async def test_create_via_tool_with_ttl_hours(self, server: LithosServer):
+        """MCP-boundary: lithos_write with ttl_hours sets expires_at correctly."""
+        tools = await server.mcp.get_tools()
+        result = await tools["lithos_write"].fn(
+            title="TTL via MCP",
+            content="Content created via MCP boundary with TTL.",
+            agent="agent",
+            ttl_hours=12.0,
+        )
+        assert result["status"] == "created"
+
+        doc, _ = await server.knowledge.read(id=result["id"])
+        assert doc.metadata.expires_at is not None
+        delta = (doc.metadata.expires_at - datetime.now(timezone.utc)).total_seconds()
+        assert 11 * 3600 < delta < 13 * 3600
+
+    @pytest.mark.asyncio
+    async def test_expires_at_normalized_to_utc(self, server: LithosServer):
+        """MCP-boundary: non-UTC expires_at is normalized to UTC on write."""
+        tools = await server.mcp.get_tools()
+        # +05:30 offset
+        result = await tools["lithos_write"].fn(
+            title="TZ Normalize",
+            content="Content with non-UTC expires_at.",
+            agent="agent",
+            expires_at="2030-06-15T12:00:00+05:30",
+        )
+        assert result["status"] == "created"
+
+        doc, _ = await server.knowledge.read(id=result["id"])
+        assert doc.metadata.expires_at is not None
+        assert doc.metadata.expires_at.tzinfo is not None
+        # 12:00 +05:30 = 06:30 UTC
+        assert doc.metadata.expires_at.hour == 6
+        assert doc.metadata.expires_at.minute == 30
+
 
 class TestMutualExclusionConformance:
     """Conformance: ttl_hours + expires_at mutual exclusion."""
@@ -70,6 +107,21 @@ class TestMutualExclusionConformance:
         assert result["status"] == "error"
         assert result["code"] == "invalid_input"
         assert "either" in result["message"].lower() or "not both" in result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_ttl_hours_with_empty_expires_at_returns_error(self, server: LithosServer):
+        """ttl_hours + expires_at='' is contradictory and returns invalid_input."""
+        tools = await server.mcp.get_tools()
+        tool = tools["lithos_write"]
+        result = await tool.fn(
+            title="Mutual Exclusion Empty",
+            content="Should fail.",
+            agent="agent",
+            ttl_hours=24.0,
+            expires_at="",
+        )
+        assert result["status"] == "error"
+        assert result["code"] == "invalid_input"
 
 
 class TestUpdateConformance:
