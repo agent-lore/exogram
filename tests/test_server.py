@@ -815,8 +815,7 @@ class TestFreshnessWritePath:
             title="TTL Doc",
             content="Content with TTL.",
             agent="agent",
-            expires_at=datetime.now(timezone.utc)
-            + __import__("datetime").timedelta(hours=24),
+            expires_at=datetime.now(timezone.utc) + __import__("datetime").timedelta(hours=24),
         )
         assert result.status == "created"
         assert result.document is not None
@@ -918,9 +917,7 @@ class TestCacheLookup:
         ).document
         server.search.index_document(doc)
 
-        result = await self._call_cache_lookup(
-            server, query="quantum computing", tags=["research"]
-        )
+        result = await self._call_cache_lookup(server, query="quantum computing", tags=["research"])
         assert result["hit"] is True
         assert result["document"] is not None
         assert result["document"]["id"] == doc.id
@@ -944,9 +941,7 @@ class TestCacheLookup:
         ).document
         server.search.index_document(doc)
 
-        result = await self._call_cache_lookup(
-            server, query="AI trends", tags=["research"]
-        )
+        result = await self._call_cache_lookup(server, query="AI trends", tags=["research"])
         assert result["hit"] is False
         assert result["document"] is None
         assert result["stale_exists"] is True
@@ -955,9 +950,7 @@ class TestCacheLookup:
     @pytest.mark.asyncio
     async def test_cache_clean_miss(self, server: LithosServer):
         """Cache lookup returns clean miss when no matching doc exists."""
-        result = await self._call_cache_lookup(
-            server, query="completely unique topic xyz123"
-        )
+        result = await self._call_cache_lookup(server, query="completely unique topic xyz123")
         assert result["hit"] is False
         assert result["document"] is None
         assert result["stale_exists"] is False

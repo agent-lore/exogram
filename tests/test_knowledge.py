@@ -2870,9 +2870,7 @@ class TestExpiresAtWritePath:
         assert result.document.metadata.expires_at is None
 
     @pytest.mark.asyncio
-    async def test_create_read_round_trip(
-        self, knowledge_manager: KnowledgeManager, test_config
-    ):
+    async def test_create_read_round_trip(self, knowledge_manager: KnowledgeManager, test_config):
         """expires_at persists through create-read round trip."""
         from datetime import timedelta
 
