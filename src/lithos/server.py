@@ -784,11 +784,8 @@ class LithosServer:
                         lithos_metrics.cache_lookup_duration.record(elapsed_ms)
                         lithos_metrics.cache_lookups.add(1, {"outcome": "error_search_backend"})
                         return {
-                            "hit": False,
-                            "document": None,
-                            "stale_exists": False,
-                            "stale_id": None,
-                            "search_unreliable": True,
+                            "status": "error",
+                            "code": "search_backend_error",
                             "message": f"Semantic search backend failed: {exc}",
                         }
 

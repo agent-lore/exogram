@@ -1086,7 +1086,7 @@ class TestCacheLookup:
 
     @pytest.mark.asyncio
     async def test_cache_lookup_search_backend_error(self, server: LithosServer):
-        """SearchBackendError surfaces as search_unreliable, not a clean miss."""
+        """SearchBackendError returns standard error shape, not a clean miss."""
         from unittest.mock import patch
 
         from lithos.errors import SearchBackendError
@@ -1095,11 +1095,9 @@ class TestCacheLookup:
         with patch.object(server.search, "semantic_search", side_effect=err):
             result = await self._call_cache_lookup(server, query="anything")
 
-        assert result["hit"] is False
-        assert result["search_unreliable"] is True
+        assert result["status"] == "error"
+        assert result["code"] == "search_backend_error"
         assert "chroma" in result["message"]
-        assert result["stale_exists"] is False
-        assert result["stale_id"] is None
 
     @pytest.mark.asyncio
     async def test_cache_lookup_invalid_max_age_hours(self, server: LithosServer):
