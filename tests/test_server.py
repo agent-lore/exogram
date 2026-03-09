@@ -803,3 +803,90 @@ Based on [[api-research-notes]].
         assert graph_stats["nodes"] >= 3
         assert coord_stats["agents"] >= 1
         assert coord_stats["active_tasks"] >= 1
+
+
+class TestFreshnessWritePath:
+    """Integration tests for ttl_hours / expires_at in lithos_write."""
+
+    @pytest.mark.asyncio
+    async def test_create_with_ttl_hours(self, server: LithosServer):
+        """Create with ttl_hours sets expires_at in metadata."""
+        result = await server.knowledge.create(
+            title="TTL Doc",
+            content="Content with TTL.",
+            agent="agent",
+            expires_at=datetime.now(timezone.utc)
+            + __import__("datetime").timedelta(hours=24),
+        )
+        assert result.status == "created"
+        assert result.document is not None
+        assert result.document.metadata.expires_at is not None
+
+    @pytest.mark.asyncio
+    async def test_create_with_ttl_read_back(self, server: LithosServer):
+        """Create with short TTL, read back, verify expires_at is set."""
+        from datetime import timedelta
+
+        expires = datetime.now(timezone.utc) + timedelta(hours=0.001)
+        result = await server.knowledge.create(
+            title="Short TTL",
+            content="Ephemeral content.",
+            agent="agent",
+            expires_at=expires,
+        )
+        doc = result.document
+        assert doc is not None
+        read_doc, _ = await server.knowledge.read(id=doc.id)
+        assert read_doc.metadata.expires_at is not None
+
+    @pytest.mark.asyncio
+    async def test_update_preserve_expires_at(self, server: LithosServer):
+        """Update without expires_at preserves existing value."""
+        from datetime import timedelta
+
+        expires = datetime.now(timezone.utc) + timedelta(hours=24)
+        doc = (
+            await server.knowledge.create(
+                title="Preserve",
+                content="Original.",
+                agent="agent",
+                expires_at=expires,
+            )
+        ).document
+        assert doc is not None
+
+        updated = (
+            await server.knowledge.update(
+                id=doc.id,
+                agent="editor",
+                content="Updated.",
+            )
+        ).document
+        assert updated is not None
+        assert updated.metadata.expires_at == expires
+
+    @pytest.mark.asyncio
+    async def test_update_clear_expires_at(self, server: LithosServer):
+        """Update with expires_at=None clears existing value."""
+        from datetime import timedelta
+
+        expires = datetime.now(timezone.utc) + timedelta(hours=24)
+        doc = (
+            await server.knowledge.create(
+                title="ClearExpiry",
+                content="Original.",
+                agent="agent",
+                expires_at=expires,
+            )
+        ).document
+        assert doc is not None
+
+        updated = (
+            await server.knowledge.update(
+                id=doc.id,
+                agent="editor",
+                expires_at=None,
+            )
+        ).document
+        assert updated is not None
+        assert updated.metadata.expires_at is None

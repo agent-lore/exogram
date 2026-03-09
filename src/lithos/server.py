@@ -5,7 +5,8 @@ import collections
 import concurrent.futures
 import hashlib
 import logging
-from datetime import datetime
+import math
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -281,6 +282,8 @@ class LithosServer:
             source_task: str | None = None,
             source_url: str | None = None,
             derived_from_ids: list[str] | None = None,
+            ttl_hours: float | None = None,
+            expires_at: str | None = None,
         ) -> dict[str, Any]:
             """Create or update a knowledge file.
 
@@ -298,6 +301,11 @@ class LithosServer:
                 derived_from_ids: List of source document UUIDs this note was derived
                     from. On update: None (omit) preserves existing; [] clears;
                     non-empty list replaces.
+                ttl_hours: Time-to-live in hours from now. Computes expires_at.
+                    Mutually exclusive with expires_at.
+                expires_at: Absolute ISO 8601 expiry datetime. On update: None (omit)
+                    preserves existing; "" clears; ISO string sets new value.
+                    Mutually exclusive with ttl_hours.
 
             Returns:
                 Dict with status envelope: created/updated/duplicate
@@ -312,6 +320,65 @@ class LithosServer:
                 await self.coordination.ensure_agent_known(agent)
 
                 warnings: list[str] = []
+
+                # Validate ttl_hours / expires_at mutual exclusion
+                if ttl_hours is not None and expires_at is not None and expires_at != "":
+                    return {
+                        "status": "error",
+                        "code": "invalid_input",
+                        "message": "Provide either ttl_hours or expires_at, not both.",
+                        "warnings": [],
+                    }
+
+                # Validate ttl_hours
+                if ttl_hours is not None and (
+                    not isinstance(ttl_hours, (int, float))
+                    or math.isnan(ttl_hours)
+                    or math.isinf(ttl_hours)
+                    or ttl_hours <= 0
+                ):
+                        return {
+                            "status": "error",
+                            "code": "invalid_input",
+                            "message": "ttl_hours must be a finite positive number.",
+                            "warnings": [],
+                        }
+
+                # Compute expires_at_dt from ttl_hours or expires_at string
+                expires_at_dt: datetime | None | _UnsetType
+                if ttl_hours is not None:
+                    expires_at_dt = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
+                elif id is not None:
+                    # Update path: map MCP boundary to manager semantics
+                    # None (omitted) → _UNSET (preserve), "" → None (clear), str → parse
+                    if expires_at is None:
+                        expires_at_dt = _UNSET
+                    elif expires_at == "":
+                        expires_at_dt = None
+                    else:
+                        try:
+                            expires_at_dt = datetime.fromisoformat(expires_at)
+                        except ValueError:
+                            return {
+                                "status": "error",
+                                "code": "invalid_input",
+                                "message": f"Invalid expires_at datetime: {expires_at}",
+                                "warnings": [],
+                            }
+                else:
+                    # Create path: None means no expiry, str → parse
+                    if expires_at is None:
+                        expires_at_dt = None
+                    else:
+                        try:
+                            expires_at_dt = datetime.fromisoformat(expires_at)
+                        except ValueError:
+                            return {
+                                "status": "error",
+                                "code": "invalid_input",
+                                "message": f"Invalid expires_at datetime: {expires_at}",
+                                "warnings": [],
+                            }
 
                 if id:
                     # Update existing — map MCP boundary to manager semantics:
@@ -340,6 +407,7 @@ class LithosServer:
                         confidence=confidence,
                         source_url=url_arg,
                         derived_from_ids=prov_arg,
+                        expires_at=expires_at_dt,
                     )
                 else:
                     # Create new — default confidence to 1.0 when not specified
@@ -353,6 +421,7 @@ class LithosServer:
                         source=source_task,
                         source_url=source_url or None,
                         derived_from_ids=derived_from_ids,
+                        expires_at=expires_at_dt,  # type: ignore[arg-type]
                     )
 
                 # Handle non-success results via WriteResult fields
