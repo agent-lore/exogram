@@ -80,3 +80,6 @@ Thumbs.db
 # Ralph
 scripts/ralph/ralph.sh
 scripts/ralph/CLAUDE.md
+scripts/ralph/prd.json
+scripts/ralph/progress.txt
+/tasks/
