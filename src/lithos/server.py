@@ -112,7 +112,7 @@ class LithosServer:
         with tracer.start_as_current_span("lithos.index.rebuild") as span:
             self.search.clear_all()
             self.graph.clear()
-            self.knowledge._scan_existing()
+            self.knowledge.rescan()
 
             knowledge_path = self.config.storage.knowledge_path
             file_count = 0
@@ -148,12 +148,12 @@ class LithosServer:
 
         # Seed the frontier with immediate neighbours
         if direction == "sources":
-            for nid in self.knowledge._doc_to_sources.get(start_id, []):
-                if nid in self.knowledge._id_to_path and nid not in visited:
+            for nid in self.knowledge.get_doc_sources(start_id):
+                if self.knowledge.has_document(nid) and nid not in visited:
                     frontier.append(nid)
                     visited.add(nid)
         else:  # "derived"
-            for nid in self.knowledge._source_to_derived.get(start_id, set()):
+            for nid in self.knowledge.get_derived_docs(start_id):
                 if nid not in visited:
                     frontier.append(nid)
                     visited.add(nid)
@@ -165,13 +165,13 @@ class LithosServer:
             next_frontier: list[str] = []
             for node_id in frontier:
                 if direction == "sources":
-                    neighbours = self.knowledge._doc_to_sources.get(node_id, [])
+                    neighbours = self.knowledge.get_doc_sources(node_id)
                     for nid in neighbours:
-                        if nid in self.knowledge._id_to_path and nid not in visited:
+                        if self.knowledge.has_document(nid) and nid not in visited:
                             next_frontier.append(nid)
                             visited.add(nid)
                 else:
-                    neighbours = self.knowledge._source_to_derived.get(node_id, set())
+                    neighbours = self.knowledge.get_derived_docs(node_id)
                     for nid in neighbours:
                         if nid not in visited:
                             next_frontier.append(nid)
@@ -185,7 +185,7 @@ class LithosServer:
             [
                 {
                     "id": nid,
-                    "title": self.knowledge._id_to_title.get(nid, ""),
+                    "title": self.knowledge.get_title_by_id(nid),
                 }
                 for nid in result_ids
             ],
@@ -447,7 +447,7 @@ class LithosServer:
                 span.set_attribute("lithos.truncated", truncated)
                 meta = doc.metadata.to_dict()
                 meta["source_url"] = doc.metadata.source_url  # null when None
-                meta["derived_from_ids"] = self.knowledge._doc_to_sources.get(doc.id, [])
+                meta.setdefault("derived_from_ids", [])
                 return {
                     "id": doc.id,
                     "title": doc.title,
@@ -551,7 +551,7 @@ class LithosServer:
                             "source_url": r.source_url,
                             "updated_at": r.updated_at,
                             "is_stale": r.is_stale,
-                            "derived_from_ids": self.knowledge._doc_to_sources.get(r.id, []),
+                            "derived_from_ids": self.knowledge.get_doc_sources(r.id),
                         }
                         for r in results
                     ]
@@ -606,7 +606,7 @@ class LithosServer:
                             "source_url": r.source_url,
                             "updated_at": r.updated_at,
                             "is_stale": r.is_stale,
-                            "derived_from_ids": self.knowledge._doc_to_sources.get(r.id, []),
+                            "derived_from_ids": self.knowledge.get_doc_sources(r.id),
                         }
                         for r in results
                     ]
@@ -664,7 +664,7 @@ class LithosServer:
                             "updated": d.metadata.updated_at.isoformat(),
                             "tags": d.metadata.tags,
                             "source_url": d.metadata.source_url or "",
-                            "derived_from_ids": self.knowledge._doc_to_sources.get(d.id, []),
+                            "derived_from_ids": self.knowledge.get_doc_sources(d.id),
                         }
                         for d in docs
                     ],
@@ -737,7 +737,7 @@ class LithosServer:
                 span.set_attribute("lithos.direction", direction)
                 span.set_attribute("lithos.depth", depth)
 
-                if id not in self.knowledge._id_to_path:
+                if not self.knowledge.has_document(id):
                     return {
                         "status": "error",
                         "code": "doc_not_found",
@@ -764,16 +764,7 @@ class LithosServer:
                 }
 
                 if include_unresolved:
-                    # Collect unresolved sources for the queried doc
-                    unresolved: set[str] = set()
-                    doc_sources = self.knowledge._doc_to_sources.get(id, [])
-                    for sid in doc_sources:
-                        if (
-                            sid in self.knowledge._unresolved_provenance
-                            or sid not in self.knowledge._id_to_path
-                        ):
-                            unresolved.add(sid)
-                    result["unresolved_sources"] = sorted(unresolved)
+                    result["unresolved_sources"] = sorted(self.knowledge.get_unresolved_sources(id))
 
                 span.set_attribute("lithos.sources_count", len(sources))
                 span.set_attribute("lithos.derived_count", len(derived))

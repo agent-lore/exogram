@@ -400,6 +400,17 @@ def truncate_content(content: str, max_length: int) -> tuple[str, bool]:
     return content[:effective_max] + "...", True
 
 
+@dataclass
+class _CachedMeta:
+    """Lightweight metadata cache for filtering without disk I/O."""
+
+    title: str
+    author: str
+    tags: list[str]
+    updated_at: datetime
+    path: Path
+
+
 class _UnsetType:
     """Sentinel type for omit-vs-clear distinction on optional fields."""
 
@@ -423,6 +434,7 @@ class KnowledgeManager:
         self.config = get_config()
         self.knowledge_path = self.config.storage.knowledge_path
         self._id_to_path: dict[str, Path] = {}
+        self._path_to_id: dict[Path, str] = {}
         self._slug_to_id: dict[str, str] = {}
         self._source_url_to_id: dict[str, str] = {}
         self._write_lock = asyncio.Lock()
@@ -432,6 +444,7 @@ class KnowledgeManager:
         self._source_to_derived: dict[str, set[str]] = {}
         self._unresolved_provenance: dict[str, set[str]] = {}
         self._id_to_title: dict[str, str] = {}
+        self._meta_cache: dict[str, _CachedMeta] = {}
         self._scan_existing()
 
     def _scan_existing(self) -> None:
@@ -443,12 +456,14 @@ class KnowledgeManager:
         """
         # Clear all indexes before rebuilding (prevents stale accumulation).
         self._id_to_path.clear()
+        self._path_to_id.clear()
         self._slug_to_id.clear()
         self._source_url_to_id.clear()
         self._doc_to_sources.clear()
         self._source_to_derived.clear()
         self._unresolved_provenance.clear()
         self._id_to_title.clear()
+        self._meta_cache.clear()
         self.duplicate_url_count = 0
 
         if not self.knowledge_path.exists():
@@ -475,9 +490,28 @@ class KnowledgeManager:
                 title: str = post.metadata.get("title", "")  # type: ignore[assignment]
                 if doc_id:
                     self._id_to_path[doc_id] = rel_path
+                    self._path_to_id[rel_path] = doc_id
                     if title:
                         self._slug_to_id[slugify(title)] = doc_id
                         self._id_to_title[doc_id] = title
+
+                    # Populate metadata cache for filtering
+                    raw_updated = post.metadata.get("updated_at")
+                    if isinstance(raw_updated, str):
+                        updated_at = datetime.fromisoformat(raw_updated)
+                    elif isinstance(raw_updated, datetime):
+                        updated_at = raw_updated
+                    else:
+                        updated_at = datetime.now(timezone.utc)
+                    raw_tags: list[str] = post.metadata.get("tags", [])  # type: ignore[assignment]
+                    raw_author: str = post.metadata.get("author", "")  # type: ignore[assignment]
+                    self._meta_cache[doc_id] = _CachedMeta(
+                        title=title,
+                        author=raw_author if isinstance(raw_author, str) else "",
+                        tags=raw_tags if isinstance(raw_tags, list) else [],
+                        updated_at=updated_at,
+                        path=rel_path,
+                    )
 
                     # Populate source_url -> id map
                     raw_url: str | None = post.metadata.get("source_url")  # type: ignore[assignment]
@@ -498,8 +532,8 @@ class KnowledgeManager:
                         deferred_provenance.append((doc_id, derived_from))
                     else:
                         deferred_provenance.append((doc_id, []))
-            except Exception:
-                pass  # Skip invalid files
+            except Exception as e:
+                logger.warning("Skipping invalid file %s: %s", md_file, e)
 
         # Pass 2: Normalize and classify provenance references as resolved or unresolved.
         for doc_id, source_ids in deferred_provenance:
@@ -652,6 +686,7 @@ class KnowledgeManager:
 
             # Update indices
             self._id_to_path[doc_id] = file_path
+            self._path_to_id[file_path] = doc_id
             self._slug_to_id[slug] = doc_id
             if norm_url is not None:
                 self._source_url_to_id[norm_url] = doc_id
@@ -679,6 +714,14 @@ class KnowledgeManager:
                 if doc_id not in self._source_to_derived:
                     self._source_to_derived[doc_id] = set()
                 self._source_to_derived[doc_id].update(resolved_docs)
+
+            self._meta_cache[doc_id] = _CachedMeta(
+                title=title,
+                author=metadata.author,
+                tags=list(metadata.tags),
+                updated_at=metadata.updated_at,
+                path=file_path,
+            )
 
             return WriteResult(status="created", document=doc, warnings=warnings)
 
@@ -725,6 +768,15 @@ class KnowledgeManager:
         truncated = False
         if max_length:
             content, truncated = truncate_content(content, max_length)
+
+        # Overlay canonical provenance from in-memory index so all callers
+        # see the same normalized value (not just the raw frontmatter).
+        # Only overlay when the index has a non-empty list; an empty index
+        # entry means the doc was created without provenance, so the on-disk
+        # frontmatter (which may have been edited externally) takes precedence.
+        indexed_sources = self._doc_to_sources.get(metadata.id)
+        if indexed_sources:
+            metadata.derived_from_ids = indexed_sources
 
         doc = KnowledgeDocument(
             id=metadata.id,
@@ -907,6 +959,15 @@ class KnowledgeManager:
             if title is not None:
                 self._id_to_title[id] = title
 
+            # Update metadata cache
+            self._meta_cache[id] = _CachedMeta(
+                title=doc.metadata.title,
+                author=doc.metadata.author,
+                tags=list(doc.metadata.tags),
+                updated_at=doc.metadata.updated_at,
+                path=doc.path,
+            )
+
             return WriteResult(status="updated", document=doc, warnings=warnings)
 
     @traced("lithos.knowledge.delete")
@@ -941,7 +1002,8 @@ class KnowledgeManager:
                 full_path.unlink()
 
             # Update indices
-            del self._id_to_path[id]
+            old_path = self._id_to_path.pop(id)
+            self._path_to_id.pop(old_path, None)
             # Remove from slug index
             self._slug_to_id = {k: v for k, v in self._slug_to_id.items() if v != id}
 
@@ -954,8 +1016,9 @@ class KnowledgeManager:
             derived_docs = self._source_to_derived.pop(id, set())
             if derived_docs:
                 self._unresolved_provenance[id] = derived_docs
-            # 4. Remove from title cache
+            # 4. Remove from title and metadata caches
             self._id_to_title.pop(id, None)
+            self._meta_cache.pop(id, None)
 
             return True, str(file_path)
 
@@ -968,47 +1031,44 @@ class KnowledgeManager:
         tags: list[str] | None = None,
         author: str | None = None,
     ) -> tuple[list[KnowledgeDocument], int]:
-        """List all documents with optional filtering."""
-        docs = []
-        total = 0
+        """List all documents with optional filtering.
+
+        Uses the in-memory metadata cache for filtering so only matching
+        documents require a full disk read.
+        """
+        matching_ids: list[str] = []
         normalized_since = _normalize_datetime(since) if since else None
 
-        for doc_id in self._id_to_path:
+        for doc_id, cached in self._meta_cache.items():
+            if path_prefix and not str(cached.path).startswith(path_prefix):
+                continue
+            if tags and not any(t in cached.tags for t in tags):
+                continue
+            if author and cached.author != author:
+                continue
+            if normalized_since:
+                doc_updated = _normalize_datetime(cached.updated_at)
+                if doc_updated < normalized_since:
+                    continue
+            matching_ids.append(doc_id)
+
+        total = len(matching_ids)
+        docs = []
+        for doc_id in matching_ids[offset : offset + limit]:
             try:
                 doc, _ = await self.read(id=doc_id)
-
-                # Apply filters
-                if path_prefix and not str(doc.path).startswith(path_prefix):
-                    continue
-                if tags and not any(t in doc.metadata.tags for t in tags):
-                    continue
-                if author and doc.metadata.author != author:
-                    continue
-                if normalized_since:
-                    doc_updated = _normalize_datetime(doc.metadata.updated_at)
-                    if doc_updated < normalized_since:
-                        continue
-
-                total += 1
-                if total > offset and len(docs) < limit:
-                    docs.append(doc)
+                docs.append(doc)
             except Exception:
                 pass
 
         return docs, total
 
     async def get_all_tags(self) -> dict[str, int]:
-        """Get all tags with document counts."""
+        """Get all tags with document counts (from in-memory cache)."""
         tag_counts: dict[str, int] = {}
-
-        for doc_id in self._id_to_path:
-            try:
-                doc, _ = await self.read(id=doc_id)
-                for tag in doc.metadata.tags:
-                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
-            except Exception:
-                pass
-
+        for cached in self._meta_cache.values():
+            for tag in cached.tags:
+                tag_counts[tag] = tag_counts.get(tag, 0) + 1
         return tag_counts
 
     async def find_by_source_url(self, url: str) -> KnowledgeDocument | None:
@@ -1077,7 +1137,12 @@ class KnowledgeManager:
         is_new = doc_id not in self._id_to_path
 
         # Update core indexes
+        if not is_new:
+            old_path = self._id_to_path.get(doc_id)
+            if old_path is not None:
+                self._path_to_id.pop(old_path, None)
         self._id_to_path[doc_id] = file_path
+        self._path_to_id[file_path] = doc_id
         old_slug = None
         if not is_new:
             # Find the old slug for this doc to clean it up
@@ -1164,6 +1229,15 @@ class KnowledgeManager:
                     self._source_to_derived[doc_id] = set()
                 self._source_to_derived[doc_id].update(resolved_docs)
 
+        # Update metadata cache
+        self._meta_cache[doc_id] = _CachedMeta(
+            title=title,
+            author=metadata.author,
+            tags=list(metadata.tags),
+            updated_at=metadata.updated_at,
+            path=file_path,
+        )
+
         return doc
 
     def get_id_by_slug(self, slug: str) -> str | None:
@@ -1171,7 +1245,7 @@ class KnowledgeManager:
         return self._slug_to_id.get(slug)
 
     def get_id_by_path(self, path: str | Path) -> str | None:
-        """Get document ID by relative/absolute path."""
+        """Get document ID by relative/absolute path (O(1) via reverse map)."""
         candidate = Path(path)
 
         if candidate.is_absolute():
@@ -1183,14 +1257,42 @@ class KnowledgeManager:
         if not candidate.suffix:
             candidate = candidate.with_suffix(".md")
 
-        for doc_id, doc_path in self._id_to_path.items():
-            if doc_path == candidate:
-                return doc_id
-        return None
+        return self._path_to_id.get(candidate)
 
     def get_all_slugs(self) -> dict[str, str]:
         """Get mapping of all slugs to IDs."""
         return dict(self._slug_to_id)
+
+    # ==================== Public Provenance Accessors ====================
+
+    def get_doc_sources(self, doc_id: str) -> list[str]:
+        """Get the source IDs this document derives from."""
+        return self._doc_to_sources.get(doc_id, [])
+
+    def get_derived_docs(self, doc_id: str) -> set[str]:
+        """Get IDs of documents derived from this document."""
+        return self._source_to_derived.get(doc_id, set())
+
+    def get_unresolved_sources(self, doc_id: str) -> list[str]:
+        """Get unresolved source IDs for a document."""
+        sources = self._doc_to_sources.get(doc_id, [])
+        return [
+            sid
+            for sid in sources
+            if sid in self._unresolved_provenance or sid not in self._id_to_path
+        ]
+
+    def get_title_by_id(self, doc_id: str) -> str:
+        """Get document title by ID, returning empty string if unknown."""
+        return self._id_to_title.get(doc_id, "")
+
+    def has_document(self, doc_id: str) -> bool:
+        """Check whether a document ID exists."""
+        return doc_id in self._id_to_path
+
+    def rescan(self) -> None:
+        """Public wrapper around _scan_existing() for index rebuilds."""
+        self._scan_existing()
 
 
 def _normalize_datetime(dt: datetime) -> datetime:
