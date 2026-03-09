@@ -49,6 +49,7 @@ _KNOWN_METADATA_KEYS = frozenset(
         "source_url",
         "supersedes",
         "derived_from_ids",
+        "expires_at",
     }
 )
 
@@ -192,7 +193,15 @@ class KnowledgeMetadata:
     source_url: str | None = None
     supersedes: str | None = None
     derived_from_ids: list[str] = field(default_factory=list)
+    expires_at: datetime | None = None
     extra: dict = field(default_factory=dict)
+
+    @property
+    def is_stale(self) -> bool:
+        """Return True when expires_at is set and in the past (UTC)."""
+        if self.expires_at is None:
+            return False
+        return datetime.now(timezone.utc) > _normalize_datetime(self.expires_at)
 
     def to_dict(self) -> dict:
         """Convert to dictionary for frontmatter.
@@ -216,6 +225,8 @@ class KnowledgeMetadata:
         }
         if self.source_url is not None:
             result["source_url"] = self.source_url
+        if self.expires_at is not None:
+            result["expires_at"] = self.expires_at.isoformat()
         if self.derived_from_ids:
             result["derived_from_ids"] = self.derived_from_ids
         # Merge unknown fields — known keys always take precedence.
@@ -243,6 +254,12 @@ class KnowledgeMetadata:
         elif updated_at is None:
             updated_at = datetime.now(timezone.utc)
 
+        expires_at = data.get("expires_at")
+        if isinstance(expires_at, str):
+            expires_at = datetime.fromisoformat(expires_at)
+        elif not isinstance(expires_at, datetime):
+            expires_at = None
+
         extra = {k: v for k, v in data.items() if k not in _KNOWN_METADATA_KEYS}
 
         return cls(
@@ -259,6 +276,7 @@ class KnowledgeMetadata:
             source_url=data.get("source_url"),
             supersedes=data.get("supersedes"),
             derived_from_ids=data.get("derived_from_ids", []),
+            expires_at=expires_at,
             extra=extra,
         )
 
