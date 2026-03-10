@@ -896,8 +896,7 @@ class TestCacheLookup:
 
     async def _call_cache_lookup(self, server: LithosServer, **kwargs) -> dict:
         """Helper to call cache lookup tool."""
-        tools = await server.mcp.get_tools()
-        tool = tools["lithos_cache_lookup"]
+        tool = await server.mcp.get_tool("lithos_cache_lookup")
         result = await tool.fn(**kwargs)
         return result
 
@@ -1125,8 +1124,8 @@ class TestWriteMutualExclusion:
     """Tests for ttl_hours / expires_at mutual exclusion at the MCP boundary."""
 
     async def _call_write(self, server: LithosServer, **kwargs) -> dict:
-        tools = await server.mcp.get_tools()
-        return await tools["lithos_write"].fn(**kwargs)
+        tool = await server.mcp.get_tool("lithos_write")
+        return await tool.fn(**kwargs)
 
     @pytest.mark.asyncio
     async def test_ttl_hours_with_empty_expires_at_is_error(self, server: LithosServer):
