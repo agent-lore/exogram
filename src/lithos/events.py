@@ -147,6 +147,30 @@ class EventBus:
                 return sub.drops
         return 0
 
+    def get_buffered_since(self, since_id: str) -> list[LithosEvent]:
+        """Return buffered events that occurred after the event with the given ID.
+
+        Used for SSE replay on reconnect. Events are returned in emission order.
+        If since_id is not found in the buffer, returns an empty list.
+
+        Args:
+            since_id: The event ID to replay from (exclusive — the named event
+                      is NOT included; only events emitted after it are returned).
+
+        Returns:
+            Ordered list of LithosEvent items emitted after the given ID.
+        """
+        events = list(self._buffer)
+        for i, event in enumerate(events):
+            if event.id == since_id:
+                return events[i + 1 :]
+        return []
+
+    @property
+    def active_subscriber_count(self) -> int:
+        """Return the number of active subscribers."""
+        return len(self._subscribers)
+
     @staticmethod
     def _matches(event: LithosEvent, sub: _Subscriber) -> bool:
         """Check if an event matches a subscriber's filters."""

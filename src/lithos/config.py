@@ -96,6 +96,10 @@ class EventsConfig(BaseModel):
     event_buffer_size: int = 500
     subscriber_queue_size: int = 100
 
+    # SSE delivery surface
+    sse_enabled: bool = True
+    max_sse_clients: int = 50
+
 
 class LithosConfig(BaseSettings):
     """Main Lithos configuration."""

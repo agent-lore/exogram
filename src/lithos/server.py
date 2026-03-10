@@ -10,7 +10,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+import json
+
 from fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import Response, StreamingResponse
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
@@ -72,8 +76,14 @@ class LithosServer:
             instructions="Local shared knowledge base for AI agents",
         )
 
+        # SSE delivery: track active client count
+        self._sse_client_count: int = 0
+
         # Register all tools
         self._register_tools()
+
+        # Mount SSE delivery endpoint
+        self.mcp.custom_route("/events", methods=["GET"])(self._sse_endpoint)
 
     @property
     def config(self) -> LithosConfig:
@@ -86,6 +96,93 @@ class LithosServer:
             await self.event_bus.emit(event)
         except Exception:
             logger.exception("Failed to emit %s event", event.type)
+
+    async def _sse_endpoint(self, request: Request) -> Response:
+        """Server-Sent Events delivery endpoint.
+
+        Query parameters:
+            types: Comma-separated event type filter (e.g. ``note.created,task.completed``).
+            tags:  Comma-separated tag filter (any match, e.g. ``research,pricing``).
+            since: Replay from a specific event ID in the ring buffer (exclusive).
+
+        Headers:
+            Last-Event-ID: Standard SSE reconnect header; takes precedence over ``?since=``.
+
+        Returns ``503`` when SSE is disabled via config and ``429`` when the
+        active client limit has been reached.
+        """
+        sse_config = self._config.events
+
+        if not sse_config.sse_enabled:
+            return Response(
+                content="SSE delivery is disabled",
+                status_code=503,
+                media_type="text/plain",
+            )
+
+        if self._sse_client_count >= sse_config.max_sse_clients:
+            return Response(
+                content="Too many SSE clients",
+                status_code=429,
+                media_type="text/plain",
+            )
+
+        # Parse filters from query params
+        raw_types = request.query_params.get("types")
+        event_types: list[str] | None = (
+            [t.strip() for t in raw_types.split(",") if t.strip()] if raw_types else None
+        )
+
+        raw_tags = request.query_params.get("tags")
+        tag_filter: list[str] | None = (
+            [t.strip() for t in raw_tags.split(",") if t.strip()] if raw_tags else None
+        )
+
+        # Determine replay start: Last-Event-ID header takes precedence over ?since=
+        since_id: str | None = request.headers.get("last-event-id") or request.query_params.get(
+            "since"
+        )
+
+        queue = self.event_bus.subscribe(event_types=event_types, tags=tag_filter)
+
+        async def _event_stream():
+            self._sse_client_count += 1
+            try:
+                # Replay buffered events if a since_id was provided
+                if since_id:
+                    replayed = self.event_bus.get_buffered_since(since_id)
+                    for evt in replayed:
+                        # Apply the same filters to replayed events
+                        if event_types and evt.type not in event_types:
+                            continue
+                        if tag_filter and not any(t in evt.tags for t in tag_filter):
+                            continue
+                        yield _format_sse(evt)
+
+                # Stream live events
+                while True:
+                    try:
+                        evt = await asyncio.wait_for(queue.get(), timeout=15.0)
+                        yield _format_sse(evt)
+                    except asyncio.TimeoutError:
+                        # Send keepalive comment to prevent proxy/firewall disconnects
+                        yield ": keepalive\n\n"
+                    except asyncio.CancelledError:
+                        break
+            except Exception:
+                logger.exception("SSE stream error")
+            finally:
+                self._sse_client_count -= 1
+                self.event_bus.unsubscribe(queue)
+
+        return StreamingResponse(
+            _event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     async def initialize(self) -> None:
         """Initialize all components."""
@@ -1543,6 +1640,26 @@ class LithosServer:
                     "tags": len(tags),
                     "duplicate_urls": self.knowledge.duplicate_url_count,
                 }
+
+
+def _format_sse(event: LithosEvent) -> str:
+    """Format a LithosEvent as an SSE message string.
+
+    Output format::
+
+        id: <event-uuid>
+        event: note.created
+        data: {"agent": "az", "title": "Acme Pricing", ...}
+
+    """
+    payload = {
+        "agent": event.agent,
+        **event.payload,
+        "tags": event.tags,
+        "timestamp": event.timestamp.isoformat(),
+    }
+    data = json.dumps(payload, default=str)
+    return f"id: {event.id}\nevent: {event.type}\ndata: {data}\n\n"
 
 
 class _FileChangeHandler(FileSystemEventHandler):
