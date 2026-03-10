@@ -547,3 +547,112 @@ class TestSSEConfig:
         cfg = EventsConfig(sse_enabled=False, max_sse_clients=10)
         assert cfg.sse_enabled is False
         assert cfg.max_sse_clients == 10
+
+
+# ---------------------------------------------------------------------------
+# Integration: HTTP route mounting and auth boundary
+# ---------------------------------------------------------------------------
+
+
+class TestSSERouteIntegration:
+    """Tests that exercise the /events route on the real Starlette app."""
+
+    @pytest.mark.asyncio
+    async def test_events_route_mounted(self, temp_dir: Path) -> None:
+        """GET /events on the real Starlette app returns text/event-stream."""
+        import httpx
+
+        config = _make_config(temp_dir)
+        server = LithosServer(config)
+        await server.initialize()
+        try:
+            app = server.mcp.http_app(transport="sse")
+            transport = httpx.ASGITransport(app=app)
+
+            async def _check() -> None:
+                async with (
+                    httpx.AsyncClient(transport=transport, base_url="http://test") as client,
+                    client.stream("GET", "/events") as resp,
+                ):
+                    assert resp.status_code == 200
+                    assert "text/event-stream" in resp.headers.get("content-type", "")
+
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(_check(), timeout=2.0)
+        finally:
+            server.stop_file_watcher()
+
+    @pytest.mark.asyncio
+    async def test_401_without_token_when_auth_configured(self, temp_dir: Path) -> None:
+        """When auth is configured, GET /events without a token returns 401."""
+        import httpx
+        from fastmcp.server.auth.providers.debug import DebugTokenVerifier
+
+        config = _make_config(temp_dir)
+        server = LithosServer(config)
+        await server.initialize()
+        try:
+            server.mcp.auth = DebugTokenVerifier()
+            app = server.mcp.http_app(transport="sse")
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.get("/events")
+                assert resp.status_code == 401
+        finally:
+            server.stop_file_watcher()
+
+    @pytest.mark.asyncio
+    async def test_200_with_valid_token_when_auth_configured(self, temp_dir: Path) -> None:
+        """When auth is configured, GET /events with a valid token returns 200 SSE."""
+        import httpx
+        from fastmcp.server.auth.providers.debug import DebugTokenVerifier
+
+        config = _make_config(temp_dir)
+        server = LithosServer(config)
+        await server.initialize()
+        try:
+            server.mcp.auth = DebugTokenVerifier()
+            app = server.mcp.http_app(transport="sse")
+            transport = httpx.ASGITransport(app=app)
+
+            async def _check() -> None:
+                async with (
+                    httpx.AsyncClient(transport=transport, base_url="http://test") as client,
+                    client.stream(
+                        "GET",
+                        "/events",
+                        headers={"Authorization": "Bearer test-token"},
+                    ) as resp,
+                ):
+                    assert resp.status_code == 200
+                    assert "text/event-stream" in resp.headers.get("content-type", "")
+
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(_check(), timeout=2.0)
+        finally:
+            server.stop_file_watcher()
+
+    @pytest.mark.asyncio
+    async def test_open_when_no_auth(self, temp_dir: Path) -> None:
+        """When no auth configured, GET /events is open (200)."""
+        import httpx
+
+        config = _make_config(temp_dir)
+        server = LithosServer(config)
+        await server.initialize()
+        try:
+            assert server.mcp.auth is None
+            app = server.mcp.http_app(transport="sse")
+            transport = httpx.ASGITransport(app=app)
+
+            async def _check() -> None:
+                async with (
+                    httpx.AsyncClient(transport=transport, base_url="http://test") as client,
+                    client.stream("GET", "/events") as resp,
+                ):
+                    assert resp.status_code == 200
+
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(_check(), timeout=2.0)
+        finally:
+            server.stop_file_watcher()

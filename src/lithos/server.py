@@ -119,6 +119,19 @@ class LithosServer:
                 media_type="text/plain",
             )
 
+        # Enforce MCP auth boundary on /events (spec requirement).
+        # When FastMCP has auth configured, app-level AuthenticationMiddleware
+        # populates request.scope["user"] with AuthenticatedUser for valid tokens.
+        if self.mcp.auth is not None:
+            from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
+
+            if not isinstance(request.scope.get("user"), AuthenticatedUser):
+                return Response(
+                    content="Authentication required",
+                    status_code=401,
+                    media_type="text/plain",
+                )
+
         if self._sse_client_count >= sse_config.max_sse_clients:
             return Response(
                 content="Too many SSE clients",
