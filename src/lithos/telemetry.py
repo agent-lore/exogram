@@ -377,6 +377,7 @@ class _LithosMetrics:
         self._event_bus_ops: Any = None
         self._cache_lookups: Any = None
         self._cache_lookup_duration: Any = None
+        self._reconcile_ops: Any = None
 
     @property
     def knowledge_ops(self) -> Any:
@@ -440,6 +441,15 @@ class _LithosMetrics:
                 description="Cache lookup latency in milliseconds",
             )
         return self._cache_lookup_duration
+
+    @property
+    def reconcile_ops(self) -> Any:
+        if self._reconcile_ops is None:
+            self._reconcile_ops = get_meter().create_counter(
+                "lithos.reconcile.operations",
+                description="Reconcile scope operations by scope and status",
+            )
+        return self._reconcile_ops
 
 
 def register_active_claims_observer(get_active_claim_count: Callable[[], int]) -> None:

@@ -417,6 +417,75 @@ def search(ctx: click.Context, query: str, semantic: bool, limit: int) -> None:
         click.echo("No results found.")
 
 
+@cli.command()
+@click.option(
+    "--scope",
+    "-s",
+    type=click.Choice(["all", "indices", "graph", "provenance_projection"]),
+    default="all",
+    help="Reconcile scope (default: all)",
+)
+@click.option(
+    "--dry-run/--no-dry-run",
+    default=False,
+    help="Compute diffs without applying any repairs (default: no)",
+)
+@click.option(
+    "--json-output/--no-json-output",
+    default=False,
+    help="Output result as JSON (default: no)",
+)
+@click.pass_context
+def reconcile(ctx: click.Context, scope: str, dry_run: bool, json_output: bool) -> None:
+    """Reconcile derived projections (indices, graph) against the markdown corpus.
+
+    This is an operator/admin command.  It repairs drift in search indices and the
+    wiki-link graph cache without ever mutating markdown source files.
+    """
+    import json
+
+    from lithos.reconcile import reconcile as _reconcile
+
+    config: LithosConfig = ctx.obj["config"]
+    config.ensure_directories()
+
+    async def run() -> None:
+        result = await _reconcile(
+            scope=scope,  # type: ignore[arg-type]
+            dry_run=dry_run,
+            config=config,
+        )
+
+        if json_output:
+            click.echo(json.dumps(result, indent=2))
+            return
+
+        dry_label = " [DRY RUN]" if dry_run else ""
+        click.echo(f"Reconcile{dry_label}: scope={result['scope']}")
+        click.echo(f"  status:   {result['status']}")
+        click.echo(f"  supported:{' yes' if result['supported'] else ' no'}")
+        s = result["summary"]
+        click.echo(
+            f"  summary:  scanned={s['scanned']} repaired={s['repaired']}"
+            f" failed={s['failed']} skipped={s['skipped']}"
+        )
+
+        if result["actions"]:
+            click.echo("  actions:")
+            for action in result["actions"]:
+                click.echo(f"    - {action}")
+
+        if result["failures"]:
+            click.echo("  failures:", err=True)
+            for failure in result["failures"]:
+                click.echo(f"    - {failure}", err=True)
+
+        non_ok = result["status"] not in ("ok", "noop")
+        raise SystemExit(1 if (result["supported"] is not False and non_ok) else 0)
+
+    asyncio.run(run())
+
+
 @cli.group()
 def inspect() -> None:
     """Inspect agent state, tasks, documents, and backend health."""

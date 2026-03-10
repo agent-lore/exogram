@@ -401,6 +401,11 @@ class TantivyIndex:
 
         return snippet
 
+    def count_docs(self) -> int:
+        """Return the number of documents in the index."""
+        self.index.reload()
+        return self.index.searcher().num_docs
+
     def clear(self) -> None:
         """Clear the entire index."""
         writer = self.index.writer(heap_size=15_000_000)
@@ -611,6 +616,15 @@ class ChromaIndex:
                 break
 
         return semantic_results
+
+    def get_indexed_doc_ids(self) -> set[str]:
+        """Return the set of unique doc_ids present in the collection."""
+        try:
+            result = self.collection.get(include=["metadatas"])
+            metadatas = result.get("metadatas") or []
+            return {str(m["doc_id"]) for m in metadatas if m and "doc_id" in m}
+        except Exception:
+            return set()
 
     def clear(self) -> None:
         """Clear the entire collection."""
