@@ -289,9 +289,7 @@ class TestTypeFilter:
             LithosEvent(type=TASK_COMPLETED),
             LithosEvent(type=NOTE_DELETED),
         ]
-        request = _make_mock_request(
-            sse_server, types=f"{NOTE_CREATED},{TASK_COMPLETED}"
-        )
+        request = _make_mock_request(sse_server, types=f"{NOTE_CREATED},{TASK_COMPLETED}")
 
         lines = await _collect_sse_lines(sse_server, request, emit_events=evts)
         events = _parse_sse_events(lines)
