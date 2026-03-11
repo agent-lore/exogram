@@ -1,6 +1,9 @@
 """Knowledge graph - NetworkX wiki-link graph operations."""
 
+import contextlib
+import os
 import pickle
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -84,7 +87,7 @@ class KnowledgeGraph:
             return False
 
     def save_cache(self) -> None:
-        """Save graph to cache."""
+        """Save graph to cache atomically (write to temp file, then rename)."""
         cache_path = self.graph_cache_path
         cache_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -96,8 +99,15 @@ class KnowledgeGraph:
             "alias_to_node": self._alias_to_node,
         }
 
-        with open(cache_path, "wb") as f:
-            pickle.dump(data, f)
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=cache_path.parent, suffix=".tmp")
+        try:
+            with os.fdopen(tmp_fd, "wb") as f:
+                pickle.dump(data, f)
+            os.replace(tmp_path, cache_path)
+        except Exception:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_path)
+            raise
 
     def add_document(self, doc: KnowledgeDocument) -> None:
         """Add or update a document in the graph.
@@ -406,6 +416,10 @@ class KnowledgeGraph:
         self._path_to_node.clear()
         self._filename_to_nodes.clear()
         self._alias_to_node.clear()
+
+    def get_doc_ids(self) -> set[str]:
+        """Return the set of doc_ids tracked by the graph."""
+        return set(self._id_to_node.keys())
 
     def node_count(self) -> int:
         """Get number of document nodes (excluding unresolved)."""
