@@ -54,8 +54,8 @@ class TestFreshnessWriteConformance:
     @pytest.mark.asyncio
     async def test_create_via_tool_with_ttl_hours(self, server: LithosServer):
         """MCP-boundary: lithos_write with ttl_hours sets expires_at correctly."""
-        tools = await server.mcp.get_tools()
-        result = await tools["lithos_write"].fn(
+        tool = await server.mcp.get_tool("lithos_write")
+        result = await tool.fn(
             title="TTL via MCP",
             content="Content created via MCP boundary with TTL.",
             agent="agent",
@@ -71,9 +71,9 @@ class TestFreshnessWriteConformance:
     @pytest.mark.asyncio
     async def test_expires_at_normalized_to_utc(self, server: LithosServer):
         """MCP-boundary: non-UTC expires_at is normalized to UTC on write."""
-        tools = await server.mcp.get_tools()
+        tool = await server.mcp.get_tool("lithos_write")
         # +05:30 offset
-        result = await tools["lithos_write"].fn(
+        result = await tool.fn(
             title="TZ Normalize",
             content="Content with non-UTC expires_at.",
             agent="agent",
@@ -95,8 +95,7 @@ class TestMutualExclusionConformance:
     @pytest.mark.asyncio
     async def test_both_ttl_and_expires_at_returns_error(self, server: LithosServer):
         """ttl_hours + expires_at together returns invalid_input."""
-        tools = await server.mcp.get_tools()
-        tool = tools["lithos_write"]
+        tool = await server.mcp.get_tool("lithos_write")
         result = await tool.fn(
             title="Mutual Exclusion",
             content="Should fail.",
@@ -111,8 +110,7 @@ class TestMutualExclusionConformance:
     @pytest.mark.asyncio
     async def test_ttl_hours_with_empty_expires_at_returns_error(self, server: LithosServer):
         """ttl_hours + expires_at='' is contradictory and returns invalid_input."""
-        tools = await server.mcp.get_tools()
-        tool = tools["lithos_write"]
+        tool = await server.mcp.get_tool("lithos_write")
         result = await tool.fn(
             title="Mutual Exclusion Empty",
             content="Should fail.",
@@ -220,8 +218,8 @@ class TestCacheLookupConformance:
     """Conformance: cache lookup hit/stale/miss."""
 
     async def _call_cache_lookup(self, server: LithosServer, **kwargs) -> dict:
-        tools = await server.mcp.get_tools()
-        return await tools["lithos_cache_lookup"].fn(**kwargs)
+        tool = await server.mcp.get_tool("lithos_cache_lookup")
+        return await tool.fn(**kwargs)
 
     @pytest.mark.asyncio
     async def test_cache_hit_fresh_doc(self, server: LithosServer):
@@ -274,8 +272,8 @@ class TestStaleUpdateFlowConformance:
     """Conformance: stale update flow."""
 
     async def _call_cache_lookup(self, server: LithosServer, **kwargs) -> dict:
-        tools = await server.mcp.get_tools()
-        return await tools["lithos_cache_lookup"].fn(**kwargs)
+        tool = await server.mcp.get_tool("lithos_cache_lookup")
+        return await tool.fn(**kwargs)
 
     @pytest.mark.asyncio
     async def test_stale_update_flow(self, server: LithosServer):
@@ -318,8 +316,8 @@ class TestSourceUrlFastPathConformance:
     """Conformance: source_url fast path."""
 
     async def _call_cache_lookup(self, server: LithosServer, **kwargs) -> dict:
-        tools = await server.mcp.get_tools()
-        return await tools["lithos_cache_lookup"].fn(**kwargs)
+        tool = await server.mcp.get_tool("lithos_cache_lookup")
+        return await tool.fn(**kwargs)
 
     @pytest.mark.asyncio
     async def test_source_url_fast_path(self, server: LithosServer):
@@ -376,8 +374,8 @@ class TestOnDiskCompatibilityConformance:
         ).document
         server.search.index_document(doc)
 
-        tools = await server.mcp.get_tools()
-        result = await tools["lithos_cache_lookup"].fn(query="container orchestration")
+        tool = await server.mcp.get_tool("lithos_cache_lookup")
+        result = await tool.fn(query="container orchestration")
         # Should be a hit (no expires_at means never stale)
         assert result["hit"] is True
         assert result["document"]["id"] == doc.id
