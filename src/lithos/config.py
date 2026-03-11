@@ -13,9 +13,10 @@ class ServerConfig(BaseModel):
     """Server configuration."""
 
     transport: Literal["stdio", "sse"] = "stdio"
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8765
     watch_files: bool = True
+    auth_token: str | None = None
 
 
 class StorageConfig(BaseModel):

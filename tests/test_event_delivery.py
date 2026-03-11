@@ -192,6 +192,7 @@ def _make_mock_request(
     tags: str | None = None,
     since: str | None = None,
     last_event_id: str | None = None,
+    authorization: str | None = None,
 ) -> Request:
     """Build a minimal Starlette Request pointing at the SSE endpoint."""
     params: list[tuple[str, str]] = []
@@ -207,6 +208,8 @@ def _make_mock_request(
     headers: list[tuple[bytes, bytes]] = []
     if last_event_id:
         headers.append((b"last-event-id", last_event_id.encode()))
+    if authorization:
+        headers.append((b"authorization", authorization.encode()))
 
     scope = {
         "type": "http",
@@ -654,5 +657,69 @@ class TestSSERouteIntegration:
 
             with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(_check(), timeout=2.0)
+        finally:
+            server.stop_file_watcher()
+
+
+# ---------------------------------------------------------------------------
+# Unit: Static auth_token on ServerConfig
+# ---------------------------------------------------------------------------
+
+
+class TestAuthToken:
+    @pytest.mark.asyncio
+    async def test_no_auth_token_allows_access(self, temp_dir: Path) -> None:
+        """When auth_token is not set, the SSE endpoint is open."""
+        config = _make_config(temp_dir)
+        assert config.server.auth_token is None
+        server = LithosServer(config)
+        await server.initialize()
+        try:
+            request = _make_mock_request(server)
+            response = await server._sse_endpoint(request)
+            assert response.status_code != 401
+        finally:
+            server.stop_file_watcher()
+
+    @pytest.mark.asyncio
+    async def test_auth_token_missing_header_returns_401(self, temp_dir: Path) -> None:
+        """When auth_token is set and no Authorization header is sent, return 401."""
+        config = _make_config(temp_dir)
+        config.server.auth_token = "secret"
+        server = LithosServer(config)
+        await server.initialize()
+        try:
+            request = _make_mock_request(server)
+            response = await server._sse_endpoint(request)
+            assert response.status_code == 401
+        finally:
+            server.stop_file_watcher()
+
+    @pytest.mark.asyncio
+    async def test_auth_token_wrong_token_returns_401(self, temp_dir: Path) -> None:
+        """When auth_token is set and a wrong token is sent, return 401."""
+        config = _make_config(temp_dir)
+        config.server.auth_token = "secret"
+        server = LithosServer(config)
+        await server.initialize()
+        try:
+            request = _make_mock_request(server, authorization="Bearer wrong-token")
+            response = await server._sse_endpoint(request)
+            assert response.status_code == 401
+        finally:
+            server.stop_file_watcher()
+
+    @pytest.mark.asyncio
+    async def test_auth_token_correct_token_allows_access(self, temp_dir: Path) -> None:
+        """When auth_token is set and the correct token is sent, access is granted."""
+        config = _make_config(temp_dir)
+        config.server.auth_token = "secret"
+        server = LithosServer(config)
+        await server.initialize()
+        try:
+            request = _make_mock_request(server, authorization="Bearer secret")
+            response = await server._sse_endpoint(request)
+            assert response.status_code != 401
+            assert isinstance(response, StreamingResponse)
         finally:
             server.stop_file_watcher()

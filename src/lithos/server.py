@@ -132,6 +132,18 @@ class LithosServer:
                     media_type="text/plain",
                 )
 
+        # Simple static token auth for SSE endpoint (independent of FastMCP auth)
+        server_auth_token = self._config.server.auth_token
+        if server_auth_token is not None:
+            auth_header = request.headers.get("authorization", "")
+            expected = f"Bearer {server_auth_token}"
+            if auth_header != expected:
+                return Response(
+                    content="Authentication required",
+                    status_code=401,
+                    media_type="text/plain",
+                )
+
         if self._sse_client_count >= sse_config.max_sse_clients:
             return Response(
                 content="Too many SSE clients",
