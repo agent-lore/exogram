@@ -52,3 +52,18 @@ Natural fit for Phase 9 (`cli-extension-plan.md`). Not a prerequisite for any ac
 Small standalone defects should be fixed directly when discovered rather than queued behind roadmap phases.
 
 Recent example: the `inspect_doc` timestamp attribute mismatch in `cli.py` was corrected directly instead of being assigned to a later CLI phase.
+
+---
+
+## 6. AgentRace Benchmark Validation
+
+**Source:** AgentRace coordination workload benchmark (observed in daily research digest, 2026-03-09)
+
+Lithos's multi-agent coordination features (task claiming with TTL, findings, agent registry, namespace isolation) map directly to the coordination workload that AgentRace benchmarks. Running Lithos against AgentRace would provide a concrete, externally-comparable validation of coordination performance.
+
+**Proposed action:** Add a `benchmarks/agentrace/` directory with a benchmark harness that exercises:
+- Task claim/release/complete throughput under concurrent agents
+- Deduplication correctness under parallel writes
+- Retrieval latency under coordination load
+
+**Deferred because:** AgentRace integration requires a benchmark harness that doesn't exist yet. Natural fit after LCMA MVP 1 ships (retrieval is the most interesting thing to benchmark). Not a prerequisite for any active plan.
