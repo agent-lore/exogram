@@ -126,25 +126,29 @@ class LithosConfig(BaseSettings):
         Handles: LITHOS_DATA_DIR, LITHOS_PORT, LITHOS_HOST,
         LITHOS_OTEL_ENABLED, OTEL_EXPORTER_OTLP_ENDPOINT
 
-        **Important:** This validator runs on *every* ``LithosConfig()``
-        instantiation, not only when called via ``load_config()``.  Any
-        constructor-level value (e.g. ``StorageConfig(data_dir=tmp)``) will be
-        silently overridden if the corresponding env var is set.
-
-        Test fixtures that need isolated configuration must monkeypatch out the
-        relevant env vars (e.g. ``monkeypatch.delenv("LITHOS_DATA_DIR", raising=False)``).
-        See ``tests/conftest.py`` — the ``test_config`` fixture is safe as long as
-        ``LITHOS_DATA_DIR`` is not set in the test environment.
+        Env vars are only applied when the corresponding field was **not**
+        explicitly set via a constructor argument.  This means
+        ``LithosConfig(storage=StorageConfig(data_dir=tmp))`` is respected
+        even when ``LITHOS_DATA_DIR`` is set in the environment.
         """
-        if data_dir := os.environ.get("LITHOS_DATA_DIR"):
+        if (data_dir := os.environ.get("LITHOS_DATA_DIR")) and (
+            "data_dir" not in self.storage.model_fields_set
+        ):
             self.storage.data_dir = Path(data_dir)
-        if port := os.environ.get("LITHOS_PORT"):
-            self.server.port = int(port)
-        if host := os.environ.get("LITHOS_HOST"):
+        if (port := os.environ.get("LITHOS_PORT")) and ("port" not in self.server.model_fields_set):
+            try:
+                self.server.port = int(port)
+            except ValueError:
+                raise ValueError(f"LITHOS_PORT must be a valid integer, got {port!r}") from None
+        if (host := os.environ.get("LITHOS_HOST")) and ("host" not in self.server.model_fields_set):
             self.server.host = host
-        if otel_enabled := os.environ.get("LITHOS_OTEL_ENABLED"):
+        if (otel_enabled := os.environ.get("LITHOS_OTEL_ENABLED")) and (
+            "enabled" not in self.telemetry.model_fields_set
+        ):
             self.telemetry.enabled = otel_enabled.lower() in ("1", "true")
-        if otlp_endpoint := os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
+        if (otlp_endpoint := os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")) and (
+            "endpoint" not in self.telemetry.model_fields_set
+        ):
             self.telemetry.endpoint = otlp_endpoint
         return self
 

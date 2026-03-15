@@ -4,6 +4,7 @@ import os
 import tempfile
 from pathlib import Path
 
+import pytest
 import yaml
 
 from lithos.config import (
@@ -206,6 +207,28 @@ class TestConfigEnvironment:
         config = load_config()
 
         assert config.telemetry.endpoint == "http://otel-collector:4318"
+
+    def test_env_port_invalid_raises(self, monkeypatch):
+        """LITHOS_PORT with a non-integer value raises a clear error."""
+        monkeypatch.setenv("LITHOS_PORT", "abc")
+
+        with pytest.raises(ValueError, match="LITHOS_PORT must be a valid integer"):
+            load_config()
+
+    def test_explicit_constructor_arg_not_overridden_by_env(self, monkeypatch):
+        """Constructor args take precedence over env vars."""
+        monkeypatch.setenv("LITHOS_DATA_DIR", "/env/data")
+        monkeypatch.setenv("LITHOS_PORT", "9999")
+        monkeypatch.setenv("LITHOS_HOST", "1.2.3.4")
+
+        config = LithosConfig(
+            storage=StorageConfig(data_dir=Path("/explicit/path")),
+            server=ServerConfig(port=1111, host="10.0.0.1"),
+        )
+
+        assert config.storage.data_dir == Path("/explicit/path")
+        assert config.server.port == 1111
+        assert config.server.host == "10.0.0.1"
 
 
 class TestConfigSingleton:
