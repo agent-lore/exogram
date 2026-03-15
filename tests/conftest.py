@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
-from lithos.config import LithosConfig, StorageConfig, set_config
+from lithos.config import LithosConfig, StorageConfig, _reset_config, set_config
 from lithos.coordination import CoordinationService
 from lithos.graph import KnowledgeGraph
 from lithos.knowledge import KnowledgeManager
@@ -33,7 +33,7 @@ def test_config(temp_dir: Path) -> Generator[LithosConfig, None, None]:
     config.ensure_directories()
     set_config(config)
     yield config
-    set_config(None)  # Reset global config after test to prevent state leakage
+    _reset_config()  # Use _reset_config() not set_config(None) — the latter raises TypeError (#43)
 
 
 @pytest.fixture
