@@ -423,6 +423,7 @@ class LithosServer:
                     Mutually exclusive with ttl_hours.
                 expected_version: If provided on update, reject with version_conflict if the
                     document's current version differs. Omit to skip version checking.
+                    On create, this parameter is silently ignored.
 
             Returns:
                 Dict with status envelope: created/updated/duplicate
@@ -609,10 +610,16 @@ class LithosServer:
                     )
                 )
 
+                # Note: the version check above reads doc from disk *before* acquiring
+                # _write_lock (inside knowledge.update). A concurrent writer could
+                # theoretically advance the version between our read and the lock.
+                # _write_lock serialises actual writes, so the check-then-write is
+                # atomic in practice; no extra I/O is needed here.
                 return {
                     "status": result.status,
                     "id": doc.id,
                     "path": str(doc.path),
+                    "version": doc.metadata.version,
                     "warnings": warnings,
                 }
 

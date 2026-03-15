@@ -3178,3 +3178,52 @@ class TestOptimisticLocking:
 
         read_doc, _ = await knowledge_manager.read(id=doc.id)
         assert read_doc.metadata.version == 2
+
+    @pytest.mark.asyncio
+    async def test_concurrent_update_second_gets_version_conflict(
+        self, knowledge_manager: KnowledgeManager
+    ):
+        """Two concurrent updates serialised by _write_lock: second gets version_conflict.
+
+        Both coroutines read version 1. _write_lock ensures the first write
+        completes and advances the doc to version 2 before the second write
+        runs. The second update supplies expected_version=1 which is now stale,
+        so it must receive a version_conflict error.
+        """
+        doc = (
+            await knowledge_manager.create(
+                title="Concurrent Conflict",
+                content="Original content.",
+                agent="agent-a",
+            )
+        ).document
+        assert doc is not None
+        assert doc.metadata.version == 1
+
+        # Both coroutines capture the same expected_version before either update runs.
+        captured_version = doc.metadata.version  # == 1
+
+        async def writer_a() -> WriteResult:
+            return await knowledge_manager.update(
+                id=doc.id,
+                agent="agent-a",
+                content="Writer A wins.",
+                expected_version=captured_version,
+            )
+
+        async def writer_b() -> WriteResult:
+            return await knowledge_manager.update(
+                id=doc.id,
+                agent="agent-b",
+                content="Writer B loses.",
+                expected_version=captured_version,
+            )
+
+        result_a, result_b = await asyncio.gather(writer_a(), writer_b())
+
+        statuses = {result_a.status, result_b.status}
+        assert "updated" in statuses, "Expected one writer to succeed"
+        assert "error" in statuses, "Expected one writer to get a conflict"
+
+        conflict_result = result_a if result_a.status == "error" else result_b
+        assert conflict_result.error_code == "version_conflict"

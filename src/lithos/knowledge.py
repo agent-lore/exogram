@@ -37,9 +37,20 @@ def _atomic_write(path: Path, content: str) -> None:
 def _parse_version(value: object) -> int:
     """Parse a version value from frontmatter, falling back to 1 on bad input."""
     try:
-        return int(value)  # type: ignore[arg-type]
+        parsed = int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
+        logger.warning(
+            "_parse_version: non-numeric version value %r in frontmatter; defaulting to 1",
+            value,
+        )
         return 1
+    if parsed < 1:
+        logger.warning(
+            "_parse_version: non-positive version value %r in frontmatter; clamping to 1",
+            parsed,
+        )
+        return 1
+    return parsed
 
 
 # Wiki-link pattern: [[target]] or [[target|display]]
@@ -896,6 +907,10 @@ class KnowledgeManager:
         - _UNSET (default): preserve existing expires_at
         - None: clear existing expires_at
         - datetime: set new value
+
+        Note: version is incremented on every call, even when no fields actually change.
+        This is intentional — simplicity over precision. Callers should not rely on
+        version stability as a proxy for content equality.
         """
         async with self._write_lock:
             lithos_metrics.knowledge_ops.add(1, {"op": "update"})
@@ -907,7 +922,6 @@ class KnowledgeManager:
                     error_code="version_conflict",
                     message=f"Version conflict: expected {expected_version}, got {doc.metadata.version}",
                 )
-            doc.metadata.version = doc.metadata.version + 1
 
             old_slug = slugify(doc.metadata.title)
             old_source_url = doc.metadata.source_url
@@ -1022,7 +1036,9 @@ class KnowledgeManager:
             if agent not in doc.metadata.contributors and agent != doc.metadata.author:
                 doc.metadata.contributors.append(agent)
 
-            # Write to disk
+            # Write to disk — bump version here so early returns above leave
+            # the in-memory document at its original version.
+            doc.metadata.version += 1
             _safe_path, full_path = self._resolve_safe_path(doc.path)
             _atomic_write(full_path, doc.to_markdown())
 
