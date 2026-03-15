@@ -1269,7 +1269,15 @@ class TestWriteContentSizeLimit:
     async def test_oversized_content_rejected(
         self, server: LithosServer, test_config: LithosConfig
     ):
-        """Content exceeding max_content_size_bytes returns content_too_large error."""
+        """Content exceeding max_content_size_bytes returns content_too_large error.
+
+        Direct mutation of ``test_config`` is intentionally visible to ``server``
+        here: ``LithosServer`` holds a reference to the same ``LithosConfig``
+        object that the ``test_config`` fixture constructed and passed to it.
+        Mutating the object *after* server construction works because the server
+        reads ``self._config.storage.max_content_size_bytes`` on every call, not
+        at construction time.
+        """
         test_config.storage.max_content_size_bytes = 10
         oversized = "x" * 11
         result = await self._call_write(
