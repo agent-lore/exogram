@@ -871,6 +871,7 @@ class LithosServer:
             source_url: str | None = None,
             max_age_hours: float | None = None,
             min_confidence: float = 0.5,
+            sort_by_confidence: bool = False,
             limit: int = 3,
             tags: list[str] | None = None,
         ) -> dict[str, Any]:
@@ -884,8 +885,18 @@ class LithosServer:
                 query: What you are about to research
                 source_url: Canonical URL for exact dedup-aware lookup
                 max_age_hours: Reject docs older than N hours (uses updated_at)
-                min_confidence: Minimum confidence threshold (default: 0.5)
-                limit: Max candidate docs to evaluate (default: 3)
+                min_confidence: Minimum confidence score threshold — candidates whose
+                    ``metadata.confidence`` is strictly below this value are skipped
+                    entirely (default: 0.5).
+                sort_by_confidence: When True, all candidates that pass the
+                    ``min_confidence`` threshold and freshness checks are ranked by
+                    ``metadata.confidence`` descending and the highest-confidence doc
+                    is returned as the hit. When False (default), the first passing
+                    candidate (in semantic-search order) is returned, preserving
+                    backward-compatible behaviour.
+                limit: Max candidate docs to evaluate (default: 3). When
+                    ``sort_by_confidence`` is True, consider increasing this value
+                    so the ranking has more candidates to choose from.
                 tags: Restrict to tagged docs (AND semantics)
 
             Returns:
@@ -962,6 +973,10 @@ class LithosServer:
                 best_hit = None
                 first_stale_id: str | None = None
                 now = datetime.now(timezone.utc)
+                # passing_docs is populated only when sort_by_confidence is True,
+                # but it is declared here unconditionally to keep the type checker
+                # happy and avoid a conditional assignment before the append below.
+                passing_docs: list[Any] = []
 
                 for doc_id in candidates:
                     try:
@@ -993,9 +1008,15 @@ class LithosServer:
                                 first_stale_id = doc_id
                             continue
 
-                    # First passing candidate is the best hit
-                    best_hit = doc
-                    break
+                    if sort_by_confidence:
+                        passing_docs.append(doc)
+                    else:
+                        # First passing candidate is the best hit
+                        best_hit = doc
+                        break
+
+                if sort_by_confidence and passing_docs:
+                    best_hit = max(passing_docs, key=lambda d: d.metadata.confidence)
 
                 span.set_attribute("cache.candidates_evaluated", candidates_evaluated)
 
