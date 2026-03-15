@@ -575,12 +575,15 @@ class LithosServer:
                     }
                 elif result.status == "error":
                     span.set_attribute("lithos.write_status", "error")
-                    return {
+                    error_response: dict[str, Any] = {
                         "status": "error",
                         "code": result.error_code,
                         "message": result.message,
                         "warnings": warnings + result.warnings,
                     }
+                    if result.current_version is not None:
+                        error_response["current_version"] = result.current_version
+                    return error_response
 
                 doc = result.document
                 assert doc is not None
@@ -610,11 +613,10 @@ class LithosServer:
                     )
                 )
 
-                # Note: the version check above reads doc from disk *before* acquiring
-                # _write_lock (inside knowledge.update). A concurrent writer could
-                # theoretically advance the version between our read and the lock.
-                # _write_lock serialises actual writes, so the check-then-write is
-                # atomic in practice; no extra I/O is needed here.
+                # Design note: knowledge.update() acquires _write_lock *before* reading
+                # the doc, checking expected_version, and writing. The read, version
+                # check, and write all happen inside the same lock acquisition, so
+                # there is no TOCTOU window — concurrent writers are fully serialised.
                 return {
                     "status": result.status,
                     "id": doc.id,

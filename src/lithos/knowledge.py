@@ -371,6 +371,7 @@ class WriteResult:
     error_code: str | None = None
     message: str | None = None
     duplicate_of: DuplicateInfo | None = None
+    current_version: int | None = None
 
 
 def slugify(text: str) -> str:
@@ -921,6 +922,7 @@ class KnowledgeManager:
                     status="error",
                     error_code="version_conflict",
                     message=f"Version conflict: expected {expected_version}, got {doc.metadata.version}",
+                    current_version=doc.metadata.version,
                 )
 
             old_slug = slugify(doc.metadata.title)

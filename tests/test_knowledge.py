@@ -3185,10 +3185,11 @@ class TestOptimisticLocking:
     ):
         """Two concurrent updates serialised by _write_lock: second gets version_conflict.
 
-        Both coroutines read version 1. _write_lock ensures the first write
-        completes and advances the doc to version 2 before the second write
-        runs. The second update supplies expected_version=1 which is now stale,
-        so it must receive a version_conflict error.
+        Both coroutines are given expected_version=1, captured before either
+        acquires the lock. _write_lock serialises them: whichever wins first
+        reads v1 from disk, writes v2, and succeeds. The second coroutine then
+        acquires the lock, reads v2 from disk, but its expected_version=1 is
+        now stale — so it receives a version_conflict error.
         """
         doc = (
             await knowledge_manager.create(

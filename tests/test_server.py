@@ -1179,6 +1179,7 @@ class TestOptimisticLockingServerLayer:
             agent="agent",
         )
         assert create_result["status"] == "created"
+        assert create_result["version"] == 1
         doc_id = create_result["id"]
 
         # Update with the correct expected_version — should succeed.
@@ -1219,6 +1220,7 @@ class TestOptimisticLockingServerLayer:
         )
         assert conflict_result["status"] == "error"
         assert conflict_result["code"] == "version_conflict"
+        assert conflict_result["current_version"] == 1
 
     @pytest.mark.asyncio
     async def test_no_expected_version_is_backwards_compatible(self, server: LithosServer):
