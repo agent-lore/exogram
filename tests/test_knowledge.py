@@ -12,12 +12,44 @@ from lithos.knowledge import (
     KnowledgeManager,
     KnowledgeMetadata,
     WriteResult,
+    _atomic_write,
     generate_slug,
     normalize_derived_from_ids_lenient,
     normalize_url,
     parse_wiki_links,
     validate_derived_from_ids,
 )
+
+
+class TestAtomicWrite:
+    """Tests for _atomic_write helper."""
+
+    def test_atomic_write_creates_file(self, tmp_path: Path):
+        """_atomic_write creates the target file with the expected content."""
+        target = tmp_path / "output.md"
+        _atomic_write(target, "hello world")
+        assert target.read_text() == "hello world"
+
+    def test_atomic_write_cleanup_on_error(self, tmp_path: Path, monkeypatch):
+        """When os.replace() raises, the temp file is cleaned up."""
+        import os
+
+        target = tmp_path / "output.md"
+
+        def failing_replace(src, dst):
+            raise OSError("simulated replace failure")
+
+        monkeypatch.setattr(os, "replace", failing_replace)
+
+        with pytest.raises(OSError, match="simulated replace failure"):
+            _atomic_write(target, "content")
+
+        # No stray .tmp files left behind
+        tmp_files = list(tmp_path.glob("*.tmp"))
+        assert tmp_files == [], f"Expected no temp files, found: {tmp_files}"
+
+        # Target was NOT created
+        assert not target.exists()
 
 
 class TestWikiLinkParsing:
