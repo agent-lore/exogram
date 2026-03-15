@@ -20,15 +20,4 @@ an optional `expected_version` parameter.  If provided and the document's
 current version does not match, the call returns a `version_conflict`
 error.  Callers that do not pass `expected_version` are unaffected.
 
-### Graph cache migrated from pickle to JSON (issue #32)
 
-PR #52 replaces the binary `graph.pickle` cache with a human-readable
-`graph.json` file.
-
-- `graph.json` stores a version sentinel (`version: 1`). If the cache
-  version does not match the expected value the cache is discarded and
-  the graph is rebuilt from source documents.
-- **Existing `graph.pickle` files are silently ignored.** The graph
-  rebuilds automatically on first startup after upgrade.
-- Requires `networkx >= 3.2` (the `edges=` keyword argument to
-  `node_link_data` / `node_link_graph` was added in 3.2).

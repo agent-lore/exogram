@@ -34,6 +34,14 @@ def _atomic_write(path: Path, content: str) -> None:
         raise
 
 
+def _parse_version(value: object) -> int:
+    """Parse a version value from frontmatter, falling back to 1 on bad input."""
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 1
+
+
 # Wiki-link pattern: [[target]] or [[target|display]]
 WIKI_LINK_PATTERN = re.compile(r"\[\[([^\]\[|]*[a-zA-Z][^\]\[|]*)(?:\|([^\]]+))?\]\]")
 
@@ -302,7 +310,7 @@ class KnowledgeMetadata:
             derived_from_ids=data.get("derived_from_ids", []),
             expires_at=expires_at,
             extra=extra,
-            version=int(data.get("version", 1)),
+            version=_parse_version(data.get("version", 1)),
         )
 
 
@@ -899,6 +907,7 @@ class KnowledgeManager:
                     error_code="version_conflict",
                     message=f"Version conflict: expected {expected_version}, got {doc.metadata.version}",
                 )
+            doc.metadata.version = doc.metadata.version + 1
 
             old_slug = slugify(doc.metadata.title)
             old_source_url = doc.metadata.source_url
@@ -1010,7 +1019,6 @@ class KnowledgeManager:
 
             # Update metadata
             doc.metadata.updated_at = datetime.now(timezone.utc)
-            doc.metadata.version = doc.metadata.version + 1
             if agent not in doc.metadata.contributors and agent != doc.metadata.author:
                 doc.metadata.contributors.append(agent)
 
