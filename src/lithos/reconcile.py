@@ -212,7 +212,14 @@ async def _reconcile_indices(config: LithosConfig, dry_run: bool) -> dict[str, A
 
 
 async def _reconcile_graph(config: LithosConfig, dry_run: bool) -> dict[str, Any]:
-    """Reconcile the wiki-link graph cache against the markdown corpus."""
+    """Reconcile the wiki-link graph cache against the markdown corpus.
+
+    When the cache is already consistent (no node/edge drift), a second pass
+    scans for stale wiki-links (targets that don't resolve to any document)
+    and reports them as ``stale_link`` actions.  Stale-link detection is
+    skipped when the cache itself needs a rebuild; the caller must reconcile
+    again after repair to surface stale links.
+    """
     tracer = get_tracer()
     actions: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
@@ -288,7 +295,32 @@ async def _reconcile_graph(config: LithosConfig, dry_run: bool) -> dict[str, Any
                         )
 
     if not actions:
-        return _make_result("graph", dry_run, status="noop", scanned=len(corpus_docs))
+        # Cache is consistent — scan for stale wiki-links (report-only, do NOT modify note content)
+        broken = graph.get_broken_links()
+        stale_actions: list[dict[str, Any]] = []
+        for source_id, source_title, link_target in broken:
+            stale_actions.append(
+                {
+                    "target": "wiki_link",
+                    "action": "stale_link",
+                    "source_id": source_id,
+                    "source_title": source_title,
+                    "link_target": link_target,
+                    "reason": "target_slug_not_found",
+                }
+            )
+
+        if not stale_actions:
+            return _make_result("graph", dry_run, status="noop", scanned=len(corpus_docs))
+
+        # Stale links detected — report them (no writes in either dry_run or real run)
+        return _make_result(
+            "graph",
+            dry_run,
+            status="ok",
+            scanned=len(corpus_docs),
+            actions=stale_actions,
+        )
 
     if dry_run:
         return _make_result(
