@@ -94,9 +94,10 @@ class KnowledgeGraph:
                 )
                 return False
             graph_data = data.get("graph")
-            self._graph = (
-                nx.node_link_graph(graph_data, edges="links") if graph_data else nx.DiGraph()
-            )
+            if graph_data and "nodes" in graph_data and "links" in graph_data:
+                self._graph = nx.node_link_graph(graph_data, edges="links")
+            else:
+                self._graph = nx.DiGraph()
             self._id_to_node = data.get("id_to_node", {})
             self._path_to_node = data.get("path_to_node", {})
             self._filename_to_nodes = data.get("filename_to_nodes", {})
