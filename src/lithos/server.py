@@ -876,7 +876,9 @@ class LithosServer:
                     is returned as the hit. When False (default), the first passing
                     candidate (in semantic-search order) is returned, preserving
                     backward-compatible behaviour.
-                limit: Max candidate docs to evaluate (default: 3)
+                limit: Max candidate docs to evaluate (default: 3). When
+                    ``sort_by_confidence`` is True, consider increasing this value
+                    so the ranking has more candidates to choose from.
                 tags: Restrict to tagged docs (AND semantics)
 
             Returns:
